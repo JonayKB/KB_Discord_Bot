@@ -48,6 +48,6 @@ module.exports = {
         saveConfig(config);
         console.info(`✅ Reaction role set: Message ID ${mensaje.id}, Role ${rol.name}, Emoji ${parsedEmoji.compare}`);
 
-        interaction.reply({ content: '✅ Mensaje configurado.', ephemeral: true });
+        interaction.reply({ content: '✅ Message ready.', ephemeral: true });
     }
 };

@@ -33,6 +33,6 @@ module.exports = {
 
         await updateConfirmationMessage(interaction.client);
 
-        interaction.reply({ content: '✅ Mensaje configurado.', ephemeral: true });
+        interaction.reply({ content: '✅ Message Ready.', ephemeral: true });
     }
 };

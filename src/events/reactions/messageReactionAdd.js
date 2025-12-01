@@ -1,6 +1,5 @@
 const { loadConfig } = require('../../utils/configManager');
 const updateConfirmationMessage = require('../../utils/updateMessage');
-
 module.exports = {
     name: "messageReactionAdd",
     async execute(client, reaction, user) {

@@ -16,7 +16,7 @@ module.exports = (client) => {
 
             client.on(event.name, (...args) => event.execute(client, ...args));
 
-            console.info(`🗹 Evento cargado: ${event.name}`);
+            console.info(`🗹 Loaded Event: ${event.name}`);
         }
     }
 };

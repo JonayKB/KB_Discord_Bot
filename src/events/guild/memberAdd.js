@@ -1,5 +1,6 @@
 const updateConfirmationsMessage = require('../../utils/updateMessage');
 
+
 module.exports = {
     name: "guildMemberAdd",
 

@@ -38,7 +38,7 @@ module.exports = (client) => {
             });
 
 
-            console.info(`🗹 Comando cargado: ${command.data.name}`);
+            console.info(`🗹 Loaded command: ${command.data.name}`);
         }
 
         // Crear instancia REST
