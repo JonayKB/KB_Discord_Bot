@@ -8,6 +8,7 @@ const updateConfirmationMessage = require('./src/utils/updateMessage');
 
 async function preloadMessages(client) {
     const config = loadConfig();
+    if(!config.reactions || config.reactions.length === 0) return;
     for (const r of config.reactions) {
         const channel = await client.channels.fetch(r.canalID);
         await channel.messages.fetch(r.mensajeID);
