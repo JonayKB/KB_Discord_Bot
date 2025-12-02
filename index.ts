@@ -32,8 +32,6 @@ const client = new Client({
 });
 
 // Registrar comandos
-
-client.commands = new Collection();
 loadCommands(client);
 
 
