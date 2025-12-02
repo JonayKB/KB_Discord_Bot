@@ -3,12 +3,13 @@
   "version": "1.0.0",
   "main": "bot.js",
   "scripts": {
-    "start": "pm2 start index.js",
-    "dev": "node index.js"
+    "start": "pm2 start index.ts",
+    "dev": "node index.ts"
   },
   "keywords": [],
   "author": "",
   "license": "MIT",
+  "type": "module",
   "description": "",
   "dependencies": {
     "discord.js": "^14.25.1",

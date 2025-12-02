@@ -1,8 +1,8 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const { saveConfig, loadConfig } = require('../../utils/configManager');
-const parseEmoji = require('../../utils/emojiParser');
+import { SlashCommandBuilder, EmbedBuilder } from 'discord.js';
+import { parseEmoji } from '../../utils/emojiParser.ts';
+import { loadConfig, saveConfig } from '../../utils/configManager.ts';
 
-module.exports = {
+export default {
     data: new SlashCommandBuilder()
         .setName('setreaction')
         .setDescription('Configura un mensaje con reacción para asignar roles')
@@ -19,7 +19,8 @@ module.exports = {
         .addRoleOption(option =>
             option.setName('rol').setDescription('Rol a asignar').setRequired(true)),
 
-    async execute(interaction) {
+    async execute(interaction: any) {
+
         const canal = interaction.options.getChannel('canal');
         const titulo = interaction.options.getString('titulo');
         const descripcion = interaction.options.getString('descripcion');
@@ -39,6 +40,9 @@ module.exports = {
         await mensaje.react(parsedEmoji.react);
 
         const config = loadConfig();
+        if (!config.reactions) {
+            config.reactions = [];
+        }
         config.reactions.push({
             canalID: canal.id,
             mensajeID: mensaje.id,

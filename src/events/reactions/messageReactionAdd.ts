@@ -1,19 +1,21 @@
-const { loadConfig } = require('../../utils/configManager');
-const updateConfirmationMessage = require('../../utils/updateMessage');
-module.exports = {
+import type { Client, User } from "discord.js";
+import type { ReactionData } from "../../types/reactionData.ts";
+
+import { loadConfig } from '../../utils/configManager.ts';
+import updateConfirmationMessage from '../../utils/updateMessage.ts';
+export default {
     name: "messageReactionAdd",
-    async execute(client, reaction, user) {
-        console.info(`🔔 Processing reaction addition by ${user.tag} on message ${reaction.message.id}`);
+    async execute(client: Client, reaction: any, user: User) {
         const config = loadConfig();
         if (user.bot) return;
         if (reaction.partial) await reaction.fetch();
         if (reaction.message.partial) await reaction.message.fetch();
-        if (config.reactions.length === 0) return;
-        const reactionConfig = config.reactions.find(r => r.mensajeID === reaction.message.id && r.emoji === reaction.emoji.name);
+        if (!config.reactions || config.reactions.length === 0) return;
+
+        const reactionConfig = config.reactions.find((r: ReactionData) => r.mensajeID === reaction.message.id && r.emoji === reaction.emoji.name);
         if (!reactionConfig) return;
         const member = await reaction.message.guild.members.fetch(user.id);
         const rol = reaction.message.guild.roles.cache.get(reactionConfig.rolID);
-        console.info(`🔔 Reaction added by ${user.tag} on message ${reaction.message.id} for role ${rol ? rol.name : 'unknown'}`);
         if (rol && !member.roles.cache.has(rol.id)) {
             await member.roles.add(rol);
             console.info(`➕ Rol ${rol.name} assigned to ${user.tag} successfully.`);

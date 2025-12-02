@@ -1,10 +1,8 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const { saveConfig, loadConfig } = require('../../utils/configManager');
-const parseEnter = require('../../utils/enterParser');
+import { SlashCommandBuilder, EmbedBuilder } from 'discord.js';
+import { saveConfig, loadConfig } from '../../utils/configManager.ts';
+import updateConfirmationMessage from '../../utils/updateMessage.ts';
 
-const updateConfirmationMessage = require('../../utils/updateMessage');
-
-module.exports = {
+export default {
     data: new SlashCommandBuilder()
         .setName('create_confirmation_message')
         .setDescription('Crea un mensaje de confirmación para nuevos miembros o cambia el mensaje al que apunta')
@@ -13,7 +11,8 @@ module.exports = {
         .addRoleOption(option =>
             option.setName('rol_contado').setDescription('Rol que se contará en el mensaje de confirmación').setRequired(true)),
 
-    async execute(interaction) {
+    async execute(interaction: any) {
+        console.log(typeof interaction);
         const canal = interaction.options.getChannel('canal');
         const rolContado = interaction.options.getRole('rol_contado');
         const config = loadConfig();

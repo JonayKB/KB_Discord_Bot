@@ -1,4 +1,6 @@
-module.exports = function parseEmoji(guild, raw) {
+import type { Guild } from "discord.js";
+
+export function parseEmoji(guild: Guild, raw: string) {
 
     // Si es :emoji:
     if (raw.startsWith(":") && raw.endsWith(":")) {

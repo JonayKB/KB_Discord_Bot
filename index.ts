@@ -1,16 +1,20 @@
-require('dotenv').config();
-const { Client, GatewayIntentBits, Partials, Collection } = require('discord.js');
-const loadCommands = require('./src/commands');
-const loadEvents = require('./src/events');
-const { loadConfig } = require('./src/utils/configManager');
-const updateConfirmationMessage = require('./src/utils/updateMessage');
+import { Client } from "discord.js";
 
+import config from 'dotenv';
+import { GatewayIntentBits, Partials, Collection } from 'discord.js';
+import loadCommands from './src/commands/index.ts';
+import loadEvents from './src/events/index.ts';
+import { loadConfig } from './src/utils/configManager.ts';
+import updateConfirmationMessage from './src/utils/updateMessage.ts';
 
-async function preloadMessages(client) {
+config.config();
+
+async function preloadMessages(client: Client) {
     const config = loadConfig();
-    if(!config.reactions || config.reactions.length === 0) return;
+    if (!config.reactions || config.reactions.length === 0) return;
     for (const r of config.reactions) {
         const channel = await client.channels.fetch(r.canalID);
+        if (!channel || !('messages' in channel)) continue;
         await channel.messages.fetch(r.mensajeID);
     }
     console.info("✅ All reaction messages preloaded");
@@ -28,8 +32,11 @@ const client = new Client({
 });
 
 // Registrar comandos
+
 client.commands = new Collection();
 loadCommands(client);
+
+
 
 // Registrar eventos
 loadEvents(client);
@@ -39,6 +46,7 @@ client.login(process.env.TOKEN);
 console.info("✅ Bot is running");
 
 client.once('clientReady', async () => {
+    if (!client.user) return;
     console.info(`🤖 Logged in as ${client.user.tag}`);
     preloadMessages(client);
     updateConfirmationMessage(client);
