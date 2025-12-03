@@ -2,10 +2,10 @@ import config from 'dotenv';
 config.config();
 import { Client, EmbedBuilder } from 'discord.js';
 const { GUILD_ID } = process.env;
-import { loadConfig } from './configManager.ts';
+import { loadConfig } from './configManager';
 let retryTimeout: NodeJS.Timeout | undefined = undefined;
-export default async function updateConfirmationsMessage(client: Client) {
-    if(retryTimeout) return;
+export default async function updateConfirmationsMessage(client: Client, retry = false) {
+    if ((retry && !retryTimeout) || (!retry && retryTimeout)) return;
     const config = loadConfig();
     if (!config.mensajeID || !config.canalID || !config.rolContadoID) {
         console.warn('⚠️ Missing configuration for confirmation message update.');
@@ -26,6 +26,7 @@ export default async function updateConfirmationsMessage(client: Client) {
             return;
         }
         const incluidos = rol ? rol.members.size : 0;
+        
         let genteString = "";
         rol.members.forEach((element) => genteString += "\n" + (element.user.globalName ?? element.user.username));
         const canal = await guild.channels.fetch(config.canalID);
@@ -38,7 +39,10 @@ export default async function updateConfirmationsMessage(client: Client) {
             console.warn('⚠️ Channel is not a text-based channel.');
             return;
         }
-        const mensaje = await canal.messages.fetch(config.mensajeID);
+        let mensaje = canal.messages.cache.get(config.mensajeID);
+        if (!mensaje) {
+            mensaje = await canal.messages.fetch(config.mensajeID);
+        }
         const embed = new EmbedBuilder()
             .setTitle('📊 Cantidad de Personas QUE HAN CONFIRMADO:')
             .setDescription(`\n\n ** Confirmados:** ${genteString}`)
@@ -52,7 +56,7 @@ export default async function updateConfirmationsMessage(client: Client) {
         if (error.data.opcode === 8) {
             if (retryTimeout) return;
             console.warn('⚠️ Rate limit exceeded. Retrying... ' + error.data.retry_after + ' seconds');
-            retryTimeout = setTimeout(() => updateConfirmationsMessage(client), error.data.retry_after * 1000 || 1000);
+            retryTimeout = setTimeout(() => updateConfirmationsMessage(client, true), error.data.retry_after * 1000 || 1000);
             return;
         }
 

@@ -1,42 +1,31 @@
-import { Client, REST, Routes } from 'discord.js';
 import fs from 'fs';
 import path from 'path';
-import config from 'dotenv';
-import { fileURLToPath } from 'url';
-
-
-// Cargar variables de entorno
-config.config();
-const { CLIENT_ID, GUILD_ID, TOKEN } = process.env;
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import { Client } from 'discord.js';
 
 export default async (client: Client) => {
-    const commandsPath = path.join(__dirname);
-    const commandFolders = fs.readdirSync(commandsPath);
+    const commandsPath = path.join(__dirname); // carpeta commands
+    const folders = fs.readdirSync(commandsPath).filter(f =>
+        fs.statSync(path.join(commandsPath, f)).isDirectory()
+    );
 
-    for (const folder of commandFolders) {
-        if (folder === 'index.ts') continue;
+    const ext = process.env.NODE_ENV === 'production' ? '.js' : '.ts';
 
+    const commands: any[] = [];
+
+    for (const folder of folders) {
         const folderPath = path.join(commandsPath, folder);
-        const commandFiles = fs.readdirSync(folderPath).filter(file => file.endsWith('.ts'));
+        const files = fs.readdirSync(folderPath).filter(file => file.endsWith('.js') || file.endsWith('.ts'));
 
-        const commands = [];
-
-        for (const file of commandFiles) {
-            const command = await import(path.join(folderPath, file));
-
-
-
-            commands.push(command.default.data.toJSON());
+        for (const file of files) {
+            const { default: command } = await import(path.join(folderPath, file));
+            commands.push(command.data.toJSON());
 
             client.on("interactionCreate", async interaction => {
                 if (!interaction.isChatInputCommand()) return;
 
-                if (interaction.commandName === command.default.data.name) {
+                if (interaction.commandName === command.data.name) {
                     try {
-                        await command.default.execute(interaction, client);
+                        await command.execute(interaction, client);
                     } catch (error) {
                         console.error(error);
                         await interaction.reply({ content: 'There was an error while executing this command!', ephemeral: true });
@@ -44,28 +33,25 @@ export default async (client: Client) => {
                 }
             });
 
-
-            console.info(`🗹 Loaded command: ${command.default.data.name}`);
+            console.info(`🗹 Loaded command: ${command.data.name}`);
         }
+    }
 
-        // Crear instancia REST
-        if (TOKEN === undefined || CLIENT_ID === undefined || GUILD_ID === undefined) {
-            console.error('❌ Missing environment variables for Discord bot.');
-            return;
-        }
-        const rest = new REST({ version: '10' }).setToken(TOKEN);
+    // Registrar comandos con REST
+    const { CLIENT_ID, GUILD_ID, TOKEN } = process.env;
+    if (!CLIENT_ID || !GUILD_ID || !TOKEN) return console.error('❌ Missing environment variables');
 
-        (async () => {
-            try {
-                console.info('🔁 Adding slash commands...');
-                await rest.put(
-                    Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
-                    { body: commands },
-                );
-                console.info('✅ Slash commands added successfully.');
-            } catch (error) {
-                console.error('❌ Error adding slash commands:', error);
-            }
-        })();
+    const { REST, Routes } = await import('discord.js');
+    const rest = new REST({ version: '10' }).setToken(TOKEN);
+
+    try {
+        console.info('🔁 Adding slash commands...');
+        await rest.put(
+            Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
+            { body: commands }
+        );
+        console.info('✅ Slash commands added successfully.');
+    } catch (error) {
+        console.error('❌ Error adding slash commands:', error);
     }
 };

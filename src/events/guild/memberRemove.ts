@@ -1,5 +1,5 @@
 import type { Client, GuildMember } from "discord.js";
-import updateConfirmationsMessage from '../../utils/updateMessage.ts';
+import updateConfirmationsMessage from '../../utils/updateMessage';
 
 export default {
     name: "guildMemberRemove",

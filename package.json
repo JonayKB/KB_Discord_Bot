@@ -1,24 +1,27 @@
 {
   "name": "botdiscord",
   "version": "1.0.0",
-  "main": "bot.js",
+  "type": "commonjs",
   "scripts": {
-    "start": "pm2 start index.ts",
-    "dev": "node index.ts"
+    "dev": "ts-node-dev --respawn src/index.ts",
+    "build": "tsc",
+    "start": "pm2 start dist/index.js --name botdiscord",
+    "stop": "pm2 stop botdiscord",
+    "restart": "pm2 restart botdiscord",
+    "deploy": "npm run build && pm2 reload botdiscord",
+    "status": "pm2 status botdiscord",
+    "monitor": "pm2 monit",
+    "logs": "pm2 logs botdiscord --lines 1000"
   },
-  "keywords": [],
-  "author": "",
-  "license": "MIT",
-  "type": "module",
-  "description": "",
   "dependencies": {
     "discord.js": "^14.25.1",
     "dotenv": "^16.5.0",
-    "pm2": "^6.0.8"
+    "node-cron": "^4.2.1",
+    "pm2": "^6.0.14"
   },
   "devDependencies": {
-    "@eslint/js": "^9.39.1",
-    "eslint": "^9.39.1",
+    "ts-node": "^10.9.1",
+    "ts-node-dev": "^2.0.0",
     "typescript": "^5.9.3"
   }
 }

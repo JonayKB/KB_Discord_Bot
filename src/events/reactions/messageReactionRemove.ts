@@ -1,7 +1,7 @@
 import type { Client, User } from 'discord.js';
-import { loadConfig } from '../../utils/configManager.ts';
-import updateConfirmationMessage from '../../utils/updateMessage.ts';
-import type { ReactionData } from '../../types/reactionData.ts';
+import { loadConfig } from '../../utils/configManager';
+import updateConfirmationMessage from '../../utils/updateMessage';
+import type { ReactionData } from '../../types/reactionData';
 
 export default {
     name: "messageReactionRemove",

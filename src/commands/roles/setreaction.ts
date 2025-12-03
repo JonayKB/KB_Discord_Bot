@@ -1,6 +1,6 @@
 import { SlashCommandBuilder, EmbedBuilder } from 'discord.js';
-import { parseEmoji } from '../../utils/emojiParser.ts';
-import { loadConfig, saveConfig } from '../../utils/configManager.ts';
+import { parseEmoji } from '../../utils/emojiParser';
+import { loadConfig, saveConfig } from '../../utils/configManager';
 
 export default {
     data: new SlashCommandBuilder()
