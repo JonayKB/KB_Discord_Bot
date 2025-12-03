@@ -43,7 +43,7 @@ loadEvents(client);
 
 client.login(process.env.TOKEN);
 
-console.info("✅ Bot is running");
+console.info("✅ Bot is running...");
 
 const ADMIN_ID = "335537584686235649";
 const ROL_NOT_TO_SEND_ID = "1371833331800346725";
