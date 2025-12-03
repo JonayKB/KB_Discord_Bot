@@ -10,8 +10,8 @@ jobs:
 
         steps:
         - name: Deploy to Remote Server
-        uses: appleboy/ssh-action@v0.1.7
-        with:
+          uses: appleboy/ssh-action@v0.1.7
+          with:
             host: ${{ vars.SSH_HOST }} 
             username: ${{ vars.SSH_USER }}
             password: ${{ secrets.SSH_PASSWORD }}
