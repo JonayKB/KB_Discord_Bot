@@ -1,0 +1,23 @@
+name: Update and Restart Repo
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+    deploy:
+        runs-on: ubuntu-latest
+
+        steps:
+        - name: Deploy to Remote Server
+        uses: appleboy/ssh-action@v0.1.7
+        with:
+            host: ${{ vars.SSH_HOST }} 
+            username: ${{ vars.SSH_USER }}
+            password: ${{ secrets.SSH_PASSWORD }}
+            port: 22
+            script: |
+            cd KB_Discord_Bot/
+            git pull
+            npm i
+            npm run deploy
