@@ -56,7 +56,6 @@ client.once('clientReady', async () => {
     try {
         const timezone = process.env.TIMEZONE ?? 'Europe/Madrid'; // optional, set e.g. 'Europe/Madrid'
         const options = timezone ? { scheduled: true, timezone } : { scheduled: true };
-
         cron.schedule('0 18 */3 * *', async () => {
             try {
                 const admin = await client.users.fetch(ADMIN_ID);

@@ -2,23 +2,38 @@ import type { GuildMember, User } from "discord.js";
 import {
     ActionRowBuilder,
     ButtonBuilder,
-    ButtonStyle
+    ButtonStyle,
+    EmbedBuilder
 } from "discord.js";
 
-export default async function sendConfirmationModal(users: User[]|GuildMember[]) {
+export default async function sendConfirmationModal(users: User[] | GuildMember[]) {
     console.info(`📩 Sending confirmation modal to users`);
 
     const button = new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder()
-            .setCustomId("open_confirmation_modal")
-            .setLabel("Abrir formulario de confirmación")
-            .setStyle(ButtonStyle.Primary)
+    .setCustomId("open_confirmation_modal")
+    .setLabel("Abrir formulario")
+    .setEmoji("📝")
+    .setStyle(ButtonStyle.Secondary)
+
     );
 
     for (const user of users) {
         try {
+            const embed = new EmbedBuilder()
+                .setColor('#3B82F6')
+                .setTitle('✨ Confirmación de Jugador')
+                .setDescription(
+                    `Para unirte al evento, completa el formulario usando el botón de abajo.  
+        
+                    **Requisito:** Usuario de Minecraft.`
+                )
+                .setTimestamp()
+                .setFooter({ text: 'Sistema automático de confirmación' });
+
+
             await user.send({
-                content: "Haz clic en el botón para abrir el formulario de confirmación (requerirás tu nombre de usuario de Minecraft):",
+                embeds: [embed],
                 components: [button]
             });
         } catch (e) {
