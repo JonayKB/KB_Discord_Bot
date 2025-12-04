@@ -48,9 +48,9 @@ export default async function updateConfirmationsMessage(client: Client, retry =
         }
         const embed = new EmbedBuilder()
             .setTitle('📊 Cantidad de Personas QUE HAN CONFIRMADO:')
-            .setDescription(`\n\n ** Confirmados:** ${genteString}`)
+            .setDescription(`\n\n ** Confirmados:** ${genteString}\n\n ** Total de personas que han confirmado:** ${incluidos}`)
             .setColor(0x27f720)
-            .setFooter({ text: 'Actualizado automáticamente para ' + incluidos + ' personas' })
+            .setFooter({ text: 'Actualizado automáticamente para ' + guild.memberCount + ' personas' })
             .setTimestamp();
         await mensaje.edit({ embeds: [embed] });
         console.info('✅ Confirmation message updated successfully.');

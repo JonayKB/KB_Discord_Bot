@@ -8,7 +8,7 @@ import { loadConfig } from './utils/configManager';
 import updateConfirmationMessage from './utils/updateMessage';
 import sendConfirmationModal from "./utils/sendConfirmateModal";
 import cron from 'node-cron';
-const {GUILD_ID='NO_GUILD_ID', TOKEN } = process.env;
+const { GUILD_ID = 'NO_GUILD_ID', TOKEN } = process.env;
 config.config();
 
 async function preloadMessages(client: Client) {
