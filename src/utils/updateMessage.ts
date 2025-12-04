@@ -18,15 +18,18 @@ export default async function updateConfirmationsMessage(client: Client, retry =
             console.warn('⚠️ Missing GUILD_ID environment variable.');
             return;
         }
-        const guild = await client.guilds.fetch(GUILD_ID);
-        await guild.members.fetch();
+        const guild = client.guilds.cache.get(GUILD_ID);
+        if (!guild) {
+            console.warn('⚠️ Guild not found.');
+            return;
+        }
         const rol = guild.roles.cache.get(config.rolContadoID);
         if (!rol) {
             console.warn('⚠️ Role not found.');
             return;
         }
         const incluidos = rol ? rol.members.size : 0;
-        
+
         let genteString = "";
         rol.members.forEach((element) => genteString += "\n" + (element.user.globalName ?? element.user.username));
         const canal = await guild.channels.fetch(config.canalID);
