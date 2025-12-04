@@ -22,9 +22,9 @@ export default async function sendConfirmationModal(users: User[] | GuildMember[
         try {
             const embed = new EmbedBuilder()
                 .setColor('#3B82F6')
-                .setTitle('✨ Confirmación de Jugador')
+                .setTitle('✨ Confirmación de Participación')
                 .setDescription(
-                    `Para unirte al evento, completa el formulario usando el botón de abajo.  
+                    `Para unirte al servidor de Minecraft, completa el formulario usando el botón de abajo.  
         
                     **Requisito:** Usuario de Minecraft.`
                 )
