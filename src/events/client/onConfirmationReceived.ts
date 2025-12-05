@@ -10,6 +10,7 @@ import path from "path";
 import { promises as fs } from "fs";
 import { loadConfig } from "../../utils/configManager";
 import envConfig   from 'dotenv';
+import updateConfirmationMessage from './utils/updateMessage';
 
 envConfig.config();
 
@@ -63,6 +64,7 @@ export default {
                     console.log(`${globalName} (${minecraftUsername})`);
                     await member.setNickname(`${globalName} (${minecraftUsername})`);
                     console.info(`✏️ Set nickname for ${interaction.user.tag} to "${minecraftUsername}"`);
+                    updateConfirmationMessage(client);
                 } catch (err) {
                     console.warn("Couldn't set nickname (missing permissions or hierarchy):", err);
                 }
