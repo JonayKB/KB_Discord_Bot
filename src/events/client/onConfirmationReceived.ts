@@ -10,7 +10,7 @@ import path from "path";
 import { promises as fs } from "fs";
 import { loadConfig } from "../../utils/configManager";
 import envConfig   from 'dotenv';
-import updateConfirmationMessage from './utils/updateMessage';
+import updateConfirmationMessage from '../../utils/updateMessage';
 
 envConfig.config();
 
