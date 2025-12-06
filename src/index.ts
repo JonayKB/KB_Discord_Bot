@@ -88,7 +88,7 @@ client.once('clientReady', async () => {
     try {
         const timezone = process.env.TIMEZONE ?? 'Europe/Madrid'; // optional, set e.g. 'Europe/Madrid'
         const options = timezone ? { scheduled: true, timezone } : { scheduled: true };
-        cron.schedule('0 18 */3 * *', sendConfirmationModalToMembers, options);
+        cron.schedule('0 18 */2 * *', sendConfirmationModalToMembers, options);
         console.info('⏰ Confirmation modal cron scheduled: every 3 days at 18:00');
     } catch (err) {
         console.error('❌ Failed to schedule confirmation modal cron:', err);
