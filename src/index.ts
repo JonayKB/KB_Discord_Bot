@@ -68,10 +68,6 @@ async function sendConfirmationModalToMembers() {
         await sendConfirmationModal(membersToSend);
         console.info('✅ Confirmation modal sent by cron job');
     } catch (err: any) {
-        if (err.data.opcode === 8) {
-            setTimeout(sendConfirmationModalToMembers, err.data.retry_after * 1000);
-            return;
-        }
         console.error('❌ Error sending confirmation modal in cron job:', err);
     }
 }
@@ -87,7 +83,6 @@ client.login(TOKEN);
 
 console.info("✅ Bot is running...");
 
-const ADMIN_ID = "335537584686235649";
 const ROL_NOT_TO_SEND_ID = "1371833331800346725";
 
 client.once('clientReady', async () => {
@@ -97,6 +92,7 @@ client.once('clientReady', async () => {
     await guild.members.fetch();
     console.info("👥 All guild members fetched");
     console.info(`🤖 Logged in as ${client.user.tag}`);
+
     preloadMessages(client);
     updateConfirmationMessage(client);
     try {

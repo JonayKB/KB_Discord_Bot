@@ -36,7 +36,7 @@ export default async function sendConfirmationModal(users: User[] | GuildMember[
                 embeds: [embed],
                 components: [button]
             });
-            console.log(`Message sent to ${user.displayName}`);
+            console.log(`📩 Message sent to ${user.displayName}`);
         } catch (e) {
             console.error(`❌ No se pudo enviar DM a ${user.displayName}`, e);
         }
