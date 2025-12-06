@@ -1,4 +1,4 @@
-import { Client, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, type Interaction } from "discord.js";
+import { Client, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } from "discord.js";
 
 export default {
     name: "interactionCreate",
