@@ -94,7 +94,7 @@ export default async function updateInfoMessage(client: Client) {
                 {
                     name: "🧑‍🚀 Lista de jugadores",
                     value: data.playerList.length > 0
-                        ? data.playerList.map(p => `• ${p}`).join("\n")
+                        ? data.playerList.map(p => `• ${p.name}`).join("\n")
                         : "*No hay jugadores conectados*"
                 }
             )
