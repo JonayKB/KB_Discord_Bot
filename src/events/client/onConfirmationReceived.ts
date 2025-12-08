@@ -6,7 +6,7 @@ import path from "path";
 import { promises as fs } from "fs";
 import { loadConfig } from "../../utils/configManager";
 import envConfig   from 'dotenv';
-import updateConfirmationMessage from '../../utils/updateMessage';
+import updateConfirmationMessage from '../../utils/updateConfirmationMessage';
 
 envConfig.config();
 
@@ -22,7 +22,7 @@ export default {
         const response = interaction.fields.getTextInputValue("confirmation_input");
 
 
-        console.log(`📝 Response of ${interaction.user.tag}: ${response}`);
+        console.info(`📝 Response of ${interaction.user.tag}: ${response}`);
         try {
             let data: Record<string, string> = {};
             try {
@@ -57,7 +57,7 @@ export default {
                 try {
 
                     const minecraftUsername = response.length > 32 ? response.slice(0, 32) : response;
-                    console.log(`${globalName} (${minecraftUsername})`);
+                    console.info(`${globalName} (${minecraftUsername})`);
                     await member.setNickname(`${globalName} (${minecraftUsername})`);
                     console.info(`✏️ Set nickname for ${interaction.user.tag} to "${minecraftUsername}"`);
                     updateConfirmationMessage(client);

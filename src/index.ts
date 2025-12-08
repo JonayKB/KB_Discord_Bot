@@ -5,9 +5,11 @@ import { GatewayIntentBits, Partials, Collection } from 'discord.js';
 import loadCommands from './commands/index';
 import loadEvents from './events/index';
 import { loadConfig } from './utils/configManager';
-import updateConfirmationMessage from './utils/updateMessage';
+import updateConfirmationMessage from './utils/updateConfirmationMessage';
 import sendConfirmationModal from "./utils/sendConfirmateModal";
 import cron from 'node-cron';
+import fetchMcServerData from "./utils/mcServerData";
+import updateInfoMessage from "./utils/updateInfoMessage";
 const { GUILD_ID = 'NO_GUILD_ID', TOKEN } = process.env;
 config.config();
 
@@ -64,19 +66,18 @@ async function sendConfirmationModalToMembers() {
             !member.roles.cache.has(ROL_NOT_TO_SEND_ID)
         ).map(m => m.user);
 
-        console.log(`📊 Members to send confirmation modal: ${membersToSend.length}`);
         await sendConfirmationModal(membersToSend);
         console.info('✅ Confirmation modal sent by cron job');
     } catch (err: any) {
         console.error('❌ Error sending confirmation modal in cron job:', err);
     }
 }
-// Registrar comandos
+// Register commands
 loadCommands(client);
 
 
 
-// Registrar eventos
+// Register events
 loadEvents(client);
 
 client.login(TOKEN);
@@ -104,7 +105,7 @@ client.once('clientReady', async () => {
         console.error('❌ Failed to schedule confirmation modal cron:', err);
     }
 
-    // Cambiar actividad cada 5 minutos
+    // Set random activity status every X minutes
     const timeInterval = 5;
 
     client.user?.setPresence({
@@ -119,6 +120,15 @@ client.once('clientReady', async () => {
             activities: [activity]
         });
     }, timeInterval * 60 * 1000);
+
+
+    // Initial update of info message
+    updateInfoMessage(client);
+
+    // Update info message every 30 seconds
+    setInterval(async () => {
+        updateInfoMessage(client);
+    }, 30 * 1000);
 
 });
 

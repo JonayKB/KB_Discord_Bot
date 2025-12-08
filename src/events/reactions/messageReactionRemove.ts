@@ -1,6 +1,6 @@
 import type { Client, User } from 'discord.js';
 import { loadConfig } from '../../utils/configManager';
-import updateConfirmationMessage from '../../utils/updateMessage';
+import updateConfirmationMessage from '../../utils/updateConfirmationMessage';
 import type { ReactionData } from '../../types/reactionData';
 
 export default {

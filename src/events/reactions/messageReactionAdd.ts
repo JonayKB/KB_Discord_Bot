@@ -2,7 +2,7 @@ import type { Client, User } from "discord.js";
 import type { ReactionData } from "../../types/reactionData";
 
 import { loadConfig } from '../../utils/configManager';
-import updateConfirmationMessage from '../../utils/updateMessage';
+import updateConfirmationMessage from '../../utils/updateConfirmationMessage';
 export default {
     name: "messageReactionAdd",
     async execute(client: Client, reaction: any, user: User) {

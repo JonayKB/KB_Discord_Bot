@@ -1,6 +1,6 @@
 import { SlashCommandBuilder, EmbedBuilder } from 'discord.js';
 import { saveConfig, loadConfig } from '../../utils/configManager';
-import updateConfirmationMessage from '../../utils/updateMessage';
+import updateConfirmationMessage from '../../utils/updateConfirmationMessage';
 
 export default {
     data: new SlashCommandBuilder()
