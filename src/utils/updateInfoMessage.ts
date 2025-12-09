@@ -84,7 +84,7 @@ export default async function updateInfoMessage(client: Client) {
                     name: "🖥️ Rendimiento",
                     value:
                         `• MSPT: **${data.mspt_1m.toFixed(2)}ms**\n` +
-                        `• CPU: **${data.cpu.toFixed(2)}%**`,
+                        `• CPU: **${(data.cpu * 100).toFixed(0)}%**`,
                     inline: true
                 },
                 {
