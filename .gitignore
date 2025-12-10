@@ -140,5 +140,6 @@ vite.config.ts.timestamp-*
 
 config.json
 names.json
+denied_reasons.json
 
 *.env
