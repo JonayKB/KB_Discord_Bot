@@ -5,9 +5,12 @@ import {
     ButtonStyle,
     EmbedBuilder
 } from "discord.js";
+import { Logger } from "./Logger";
+
+const logger = new Logger("SendConfirmationModal");
 
 export default async function sendConfirmationModal(users: User[] | GuildMember[]) {
-    console.info(`📩 Sending confirmation modal to users`);
+    logger.info(`📩 Sending confirmation modal to users`);
 
     const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder()
@@ -41,9 +44,9 @@ export default async function sendConfirmationModal(users: User[] | GuildMember[
                 embeds: [embed],
                 components: [buttons]
             });
-            console.info(`📩 Message sent to ${user.displayName}`);
-        } catch (e) {
-            console.error(`❌ No se pudo enviar DM a ${user.displayName}`, e);
+            logger.info(`📩 Message sent to ${user.displayName}`);
+        } catch (e: any) {
+            logger.error(`❌ No se pudo enviar DM a ${user.displayName}`, e);
         }
     }
 }

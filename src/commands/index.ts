@@ -1,14 +1,16 @@
-import fs from 'fs';
-import path from 'path';
+import fs from 'node:fs';
+import path from 'node:path';
 import { Client } from 'discord.js';
+import { Logger } from '../utils/Logger';
 
-export default async (client: Client) => {
-    const commandsPath = path.join(__dirname); // carpeta commands
+const logger = new Logger("CommandLoader");
+
+export default async function loadCommands(client: Client) {
+    const commandsPath = path.join(__dirname);
     const folders = fs.readdirSync(commandsPath).filter(f =>
         fs.statSync(path.join(commandsPath, f)).isDirectory()
     );
 
-    const ext = process.env.NODE_ENV === 'production' ? '.js' : '.ts';
 
     const commands: any[] = [];
 
@@ -27,31 +29,31 @@ export default async (client: Client) => {
                     try {
                         await command.execute(interaction, client);
                     } catch (error) {
-                        console.error(error);
+                        logger.error(error);
                         await interaction.reply({ content: 'There was an error while executing this command!', ephemeral: true });
                     }
                 }
             });
 
-            console.info(`🗹 Loaded command: ${command.data.name}`);
+            logger.info(`🗹 Loaded command: ${command.data.name}`);
         }
     }
 
-    // Registrar comandos con REST
+    // Register commands with Discord API
     const { CLIENT_ID, GUILD_ID, TOKEN } = process.env;
-    if (!CLIENT_ID || !GUILD_ID || !TOKEN) return console.error('❌ Missing environment variables');
+    if (!CLIENT_ID || !GUILD_ID || !TOKEN) return logger.error('❌ Missing environment variables');
 
     const { REST, Routes } = await import('discord.js');
     const rest = new REST({ version: '10' }).setToken(TOKEN);
 
     try {
-        console.info('🔁 Adding slash commands...');
+        logger.info('🔁 Adding slash commands...');
         await rest.put(
             Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
             { body: commands }
         );
-        console.info('✅ Slash commands added successfully.');
-    } catch (error) {
-        console.error('❌ Error adding slash commands:', error);
+        logger.info('✅ Slash commands added successfully.');
+    } catch (error: any) {
+        logger.error('❌ Error adding slash commands:', error);
     }
-};
+}

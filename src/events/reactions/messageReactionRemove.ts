@@ -2,6 +2,9 @@ import type { Client, User } from 'discord.js';
 import { loadConfig } from '../../utils/configManager';
 import updateConfirmationMessage from '../../utils/updateConfirmationMessage';
 import type { ReactionData } from '../../types/reactionData';
+import { Logger } from '../../utils/Logger';
+
+const logger = new Logger("MessageReactionRemove");
 
 export default {
     name: "messageReactionRemove",
@@ -17,7 +20,7 @@ export default {
         const rol = reaction.message.guild.roles.cache.get(reactionConfig.rolID);
         if (rol && member.roles.cache.has(rol.id)) {
             await member.roles.remove(rol);
-            console.info(`➖ Rol ${rol.name} removed from ${user.tag} successfully.`);
+            logger.info(`➖ Rol ${rol.name} removed from ${user.tag} successfully.`);
             await updateConfirmationMessage(client);
         }
     }

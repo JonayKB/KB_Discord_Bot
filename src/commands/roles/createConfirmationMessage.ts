@@ -12,7 +12,6 @@ export default {
             option.setName('rol_contado').setDescription('Rol que se contará en el mensaje de confirmación').setRequired(true)),
 
     async execute(interaction: any) {
-        console.log(typeof interaction);
         const canal = interaction.options.getChannel('canal');
         const rolContado = interaction.options.getRole('rol_contado');
         const config = loadConfig();

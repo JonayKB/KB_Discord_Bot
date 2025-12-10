@@ -40,10 +40,6 @@ export default function fetchMcServerData() {
 
             return response;
 
-
-
-
-
         })
         .catch(error => {
             return null;

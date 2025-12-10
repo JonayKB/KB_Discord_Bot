@@ -1,13 +1,16 @@
 import { EmbedBuilder, type Client, type GuildMember } from "discord.js";
 import updateConfirmationsMessage from '../../utils/updateConfirmationMessage';
 import sendConfirmationModal from "../../utils/sendConfirmateModal";
+import { Logger } from '../../utils/Logger';
+
+const logger = new Logger("GuildMemberAdd");
 
 
 export default {
     name: "guildMemberAdd",
 
     async execute(client: Client, member: GuildMember) {
-        console.info(`➡️ New member: ${member.user.tag}`);
+        logger.info(`➡️ New member: ${member.user.tag}`);
         await updateConfirmationsMessage(client);
         const embed = new EmbedBuilder()
             .setColor(0x00FF00)
@@ -29,7 +32,7 @@ export default {
 
 
         await member.send({ embeds: [embed] }).catch(() => {
-            console.warn(`⚠️ No se pudo enviar el mensaje de bienvenida a ${member.user.tag}.`);
+            logger.warn(`⚠️ No se pudo enviar el mensaje de bienvenida a ${member.user.tag}.`);
         });
         await sendConfirmationModal([member]);
     }

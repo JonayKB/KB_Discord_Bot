@@ -3,69 +3,74 @@ config.config();
 import { Client, EmbedBuilder } from 'discord.js';
 const { GUILD_ID } = process.env;
 import { loadConfig } from './configManager';
+import { Logger } from './Logger';
 let retryTimeout: NodeJS.Timeout | undefined = undefined;
+const logger = new Logger("UpdateConfirmationMessage");
 export default async function updateConfirmationsMessage(client: Client, retry = false) {
     if ((retry && !retryTimeout) || (!retry && retryTimeout)) return;
-    const config = loadConfig();
-    if (!config.mensajeID || !config.canalID || !config.rolContadoID) {
-        console.warn('⚠️ Missing configuration for confirmation message update.');
+    const cfg = loadConfig();
+    if (!cfg.mensajeID || !cfg.canalID || !cfg.rolContadoID) {
+        logger.warn('⚠️ Missing configuration for confirmation message update.');
         return;
-    };
+    }
 
     try {
-        console.info('🔄 Updating confirmation message...');
+        logger.info('🔄 Updating confirmation message...');
         if (!GUILD_ID) {
-            console.warn('⚠️ Missing GUILD_ID environment variable.');
+            logger.warn('⚠️ Missing GUILD_ID environment variable.');
             return;
         }
+
         const guild = client.guilds.cache.get(GUILD_ID);
         if (!guild) {
-            console.warn('⚠️ Guild not found.');
+            logger.warn('⚠️ Guild not found.');
             return;
         }
-        const rol = guild.roles.cache.get(config.rolContadoID);
+
+        const rol = guild.roles.cache.get(cfg.rolContadoID);
         if (!rol) {
-            console.warn('⚠️ Role not found.');
-            return;
-        }
-        const incluidos = rol ? rol.members.size : 0;
-
-        let genteString = "";
-        rol.members.forEach((element) => genteString += "\n" + (element.user.globalName ?? element.user.username));
-        const canal = await guild.channels.fetch(config.canalID);
-        if (!canal) {
-            console.warn('⚠️ Channel not found.');
+            logger.warn('⚠️ Role not found.');
             return;
         }
 
-        if (!('messages' in canal) || typeof canal.messages === 'undefined') {
-            console.warn('⚠️ Channel is not a text-based channel.');
+        const incluidos = rol.members.size;
+        const genteString = Array.from(rol.members.values())
+            .map((m) => m.user.globalName ?? m.user.username)
+            .join('\n');
+
+        const canal = await guild.channels.fetch(cfg.canalID);
+        if (!canal || !('messages' in canal) || canal.messages === undefined) {
+            logger.warn('⚠️ Channel not found or is not a text-based channel.');
             return;
         }
-        let mensaje = canal.messages.cache.get(config.mensajeID);
-        if (!mensaje) {
-            mensaje = await canal.messages.fetch(config.mensajeID);
-        }
-        const embed = new EmbedBuilder()
-            .setTitle('📊 Cantidad de Personas QUE HAN CONFIRMADO:')
-            .setDescription(`\n\n ** Confirmados:** ${genteString}\n\n ** Total de personas que han confirmado:** ${incluidos}`)
-            .setColor(0x27f720)
-            .setFooter({ text: 'Actualizado automáticamente para ' + guild.memberCount + ' personas' })
-            .setTimestamp();
+
+        let mensaje = canal.messages.cache.get(cfg.mensajeID) ?? await canal.messages.fetch(cfg.mensajeID);
+        const embed = buildConfirmationEmbed(genteString, incluidos, guild.memberCount);
         await mensaje.edit({ embeds: [embed] });
-        console.info('✅ Confirmation message updated successfully.');
+        logger.info('✅ Confirmation message updated successfully.');
         retryTimeout = undefined;
     } catch (error: any) {
-        if (error.data.opcode === 8) {
-            if (retryTimeout) return;
-            console.warn('⚠️ Rate limit exceeded. Retrying... ' + error.data.retry_after + ' seconds');
-            retryTimeout = setTimeout(() => updateConfirmationsMessage(client, true), error.data.retry_after * 1000 || 1000);
-            return;
-        }
-
-        console.error('❌ Error updating confirmation message:', error);
-        return;
-
+        handleUpdateError(error, client);
     }
-    return;
+}
+
+function buildConfirmationEmbed(genteString: string, incluidos: number, memberCount: number) {
+    return new EmbedBuilder()
+        .setTitle('📊 Cantidad de Personas QUE HAN CONFIRMADO:')
+        .setDescription(`\n\n ** Confirmados:** ${genteString}\n\n ** Total de personas que han confirmado:** ${incluidos}`)
+        .setColor(0x27f720)
+        .setFooter({ text: 'Actualizado automáticamente para ' + memberCount + ' personas' })
+        .setTimestamp();
+}
+
+function handleUpdateError(error: any, client: Client) {
+    const opcode = error?.data?.opcode;
+    const retryAfter = error?.data?.retry_after;
+    if (opcode === 8) {
+        if (retryTimeout) return;
+        logger.warn('⚠️ Rate limit exceeded. Retrying... ' + retryAfter + ' seconds');
+        retryTimeout = setTimeout(() => updateConfirmationsMessage(client, true), (retryAfter ?? 1) * 1000);
+        return;
+    }
+    logger.error('❌ Error updating confirmation message:', error);
 }

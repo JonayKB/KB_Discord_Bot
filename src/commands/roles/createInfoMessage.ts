@@ -1,6 +1,9 @@
 import { SlashCommandBuilder, EmbedBuilder } from 'discord.js';
 import { saveConfig, loadConfig } from '../../utils/configManager';
 import updateInfoMessage from '../../utils/updateInfoMessage';
+import { Logger } from '../../utils/Logger';
+
+const logger = new Logger("CreateInfoMessageCommand");
 
 
 
@@ -27,7 +30,7 @@ export default {
 
         saveConfig(config);
 
-        console.info(`✅ Info message created`);
+        logger.info(`✅ Info message created`);
 
         updateInfoMessage(interaction.client);
 

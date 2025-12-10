@@ -1,17 +1,23 @@
-import { ActivityType, Client } from "discord.js";
+import { ActivityType, Client, GatewayIntentBits, Partials } from "discord.js";
 
 import config from 'dotenv';
-import { GatewayIntentBits, Partials, Collection } from 'discord.js';
 import loadCommands from './commands/index';
 import loadEvents from './events/index';
 import { loadConfig } from './utils/configManager';
 import updateConfirmationMessage from './utils/updateConfirmationMessage';
 import sendConfirmationModal from "./utils/sendConfirmateModal";
 import cron from 'node-cron';
-import fetchMcServerData from "./utils/mcServerData";
 import updateInfoMessage from "./utils/updateInfoMessage";
+import { Logger } from "./utils/Logger";
+import compressLogs from "./utils/LogCompreser";
 const { GUILD_ID = 'NO_GUILD_ID', TOKEN } = process.env;
 config.config();
+
+const logger = new Logger("Index");
+
+
+const timezone = process.env.TIMEZONE ?? 'Europe/Madrid'; // optional, set e.g. 'Europe/Madrid'
+const options = timezone ? { scheduled: true, timezone } : { scheduled: true };
 
 async function preloadMessages(client: Client) {
     const config = loadConfig();
@@ -21,7 +27,7 @@ async function preloadMessages(client: Client) {
         if (!channel || !('messages' in channel)) continue;
         await channel.messages.fetch(r.mensajeID);
     }
-    console.info("✅ All reaction messages preloaded");
+    logger.info("✅ All reaction messages preloaded");
 }
 const client = new Client({
     intents: [
@@ -52,12 +58,12 @@ async function sendConfirmationModalToMembers() {
     try {
         const guild = client.guilds.cache.get(GUILD_ID);
         if (!guild) {
-            console.error('❌ Guild not found');
+            logger.error('❌ Guild not found');
             return;
         }
         const allMembers = guild.members.cache;
         if (!allMembers) {
-            console.error('❌ Cannot fetch guild members');
+            logger.error('❌ Cannot fetch guild members');
             return;
         }
 
@@ -68,9 +74,9 @@ async function sendConfirmationModalToMembers() {
         ).map(m => m.user);
 
         await sendConfirmationModal(membersToSend);
-        console.info('✅ Confirmation modal sent by cron job');
+        logger.info('✅ Confirmation modal sent by cron job');
     } catch (err: any) {
-        console.error('❌ Error sending confirmation modal in cron job:', err);
+        logger.error('❌ Error sending confirmation modal in cron job:', err);
     }
 }
 // Register commands
@@ -83,29 +89,28 @@ loadEvents(client);
 
 client.login(TOKEN);
 
-console.info("✅ Bot is running...");
+logger.info("✅ Bot is running...");
 
 const ROL_NOT_TO_SEND_ID = "1371833331800346725";
 const ROL_IGNORE_ID = "1448303235285909605";
 
+// On client ready
 client.once('clientReady', async () => {
     if (!client.user) return;
 
     const guild = await client.guilds.fetch(GUILD_ID);
     await guild.members.fetch();
-    console.info("👥 All guild members fetched");
-    console.info(`🤖 Logged in as ${client.user.tag}`);
+    logger.info("👥 All guild members fetched");
+    logger.info(`🤖 Logged in as ${client.user.tag}`);
 
     preloadMessages(client);
     updateConfirmationMessage(client);
 
     try {
-        const timezone = process.env.TIMEZONE ?? 'Europe/Madrid'; // optional, set e.g. 'Europe/Madrid'
-        const options = timezone ? { scheduled: true, timezone } : { scheduled: true };
         cron.schedule('0 18 */2 * *', sendConfirmationModalToMembers, options);
-        console.info('⏰ Confirmation modal cron scheduled: every 2 days at 18:00');
-    } catch (err) {
-        console.error('❌ Failed to schedule confirmation modal cron:', err);
+        logger.info('⏰ Confirmation modal cron scheduled: every 2 days at 18:00');
+    } catch (err: any) {
+        logger.error('❌ Failed to schedule confirmation modal cron:', err);
     }
 
     // Set random activity status every X minutes
@@ -128,10 +133,22 @@ client.once('clientReady', async () => {
     // Initial update of info message
     updateInfoMessage(client);
 
+
     // Update info message every 30 seconds
     setInterval(async () => {
         updateInfoMessage(client);
     }, 30 * 1000);
+
+
+    // Compress logs every day at midnight
+    try {
+        cron.schedule('0 0 * * *', async () => {
+            compressLogs();
+        }, options);
+        logger.info('⏰ Log compression cron scheduled: daily at midnight');
+    } catch (err: any) {
+        logger.error('❌ Error compressing logs:', err);
+    }
 
 });
 

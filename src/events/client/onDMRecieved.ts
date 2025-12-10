@@ -1,4 +1,7 @@
 import { ChannelType, Client, type Message, ActionRowBuilder, ButtonBuilder, ButtonStyle } from "discord.js";
+import { Logger } from "../../utils/Logger";
+
+const logger = new Logger("DMReceived");
 
 export default {
     name: "messageCreate",
@@ -7,13 +10,13 @@ export default {
         if (message.author.bot) return;
         if (message.channel.type !== ChannelType.DM) return;
 
-        console.info(`📩 New DM from ${message.author.tag}: ${message.content}`);
+        logger.info(`📩 New DM from ${message.author.tag}: ${message.content}`);
 
         (async () => {
             const adminId = process.env.ADMIN_ID ?? "335537584686235649";
             try {
                 const admin = await client.users.fetch(adminId);
-                if (!admin) return console.warn("Admin user not found");
+                if (!admin) return logger.warn("Admin user not found");
 
                 const embed = {
                     title: `📩 New DM from ${message.author.tag}`,
@@ -35,9 +38,9 @@ export default {
                 );
 
                 await admin.send({ embeds: [embed], components: [row] });
-                console.info("Forwarded DM to admin with reply button");
-            } catch (err) {
-                console.error("Failed to forward DM to admin:", err);
+                logger.info("Forwarded DM to admin with reply button");
+            } catch (err: any) {
+                logger.error("Failed to forward DM to admin:", err);
             }
         })();
     }

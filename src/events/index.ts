@@ -1,9 +1,12 @@
 import type { Client } from "discord.js";
-import fs from 'fs';
-import path from 'path';
+import fs from 'node:fs';
+import path from 'node:path';
+import { Logger } from "../utils/Logger";
+
+const logger = new Logger("EventLoader");
 
 
-export default async (client: Client) => {
+export default async function loadEvents(client: Client) {
   const eventsPath = path.join(__dirname);
 
   // Filtrar solo carpetas, ignorar archivos como index.ts o index.js
@@ -18,13 +21,13 @@ export default async (client: Client) => {
     for (const file of eventFiles) {
       const { default: event } = await import(path.join(folderPath, file));
 
-      if (!event || !event.name || !event.execute) {
-        console.warn(`⚠️ Invalid event in file ${file}`);
+      if (!event?.name || !event.execute) {
+        logger.warn(`⚠️ Invalid event in file ${file}`);
         continue;
       }
 
       client.on(event.name, (...args) => event.execute(client, ...args));
-      console.info(`🗹 Loaded Event: ${event.name}`);
+      logger.info(`🗹 Loaded Event: ${event.name}`);
     }
   }
 };

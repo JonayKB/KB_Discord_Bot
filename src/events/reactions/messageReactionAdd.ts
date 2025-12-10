@@ -3,6 +3,9 @@ import type { ReactionData } from "../../types/reactionData";
 
 import { loadConfig } from '../../utils/configManager';
 import updateConfirmationMessage from '../../utils/updateConfirmationMessage';
+import { Logger } from '../../utils/Logger';
+
+const logger = new Logger("MessageReactionAdd");
 export default {
     name: "messageReactionAdd",
     async execute(client: Client, reaction: any, user: User) {
@@ -18,7 +21,7 @@ export default {
         const rol = reaction.message.guild.roles.cache.get(reactionConfig.rolID);
         if (rol && !member.roles.cache.has(rol.id)) {
             await member.roles.add(rol);
-            console.info(`➕ Rol ${rol.name} assigned to ${user.tag} successfully.`);
+            logger.info(`➕ Rol ${rol.name} assigned to ${user.tag} successfully.`);
             await updateConfirmationMessage(client);
         }
     }

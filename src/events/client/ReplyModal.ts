@@ -1,4 +1,7 @@
 import { Client, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } from "discord.js";
+import { Logger } from "../../utils/Logger";
+
+const logger = new Logger("ReplyModal");
 
 export default {
     name: "interactionCreate",
@@ -33,7 +36,7 @@ export default {
                 await user.send(`📩 Respuesta del Administrador: ${response}`);
                 await interaction.reply({ content: "✅ Mensaje enviado al usuario", ephemeral: true });
             } catch (err) {
-                console.error(err);
+                logger.error(err);
                 await interaction.reply({ content: "❌ No se pudo enviar el mensaje", ephemeral: true });
             }
         }

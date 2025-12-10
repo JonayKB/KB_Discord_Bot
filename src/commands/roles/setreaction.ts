@@ -1,6 +1,9 @@
 import { SlashCommandBuilder, EmbedBuilder } from 'discord.js';
 import { parseEmoji } from '../../utils/emojiParser';
 import { loadConfig, saveConfig } from '../../utils/configManager';
+import { Logger } from '../../utils/Logger';
+
+const logger = new Logger("SetReactionCommand");
 
 export default {
     data: new SlashCommandBuilder()
@@ -50,7 +53,7 @@ export default {
             emoji: parsedEmoji.compare
         });
         saveConfig(config);
-        console.info(`✅ Reaction role set: Message ID ${mensaje.id}, Role ${rol.name}, Emoji ${parsedEmoji.compare}`);
+        logger.info(`✅ Reaction role set: Message ID ${mensaje.id}, Role ${rol.name}, Emoji ${parsedEmoji.compare}`);
 
         interaction.reply({ content: '✅ Message ready.', ephemeral: true });
     }
