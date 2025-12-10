@@ -139,7 +139,6 @@ client.once('clientReady', async () => {
         updateInfoMessage(client);
     }, 30 * 1000);
 
-
     // Compress logs every day at midnight
     try {
         cron.schedule('0 0 * * *', async () => {

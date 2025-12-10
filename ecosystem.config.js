@@ -1,7 +1,7 @@
-export default {
+module.exports = {
   apps: [
     {
-      name: "kb-discord-bot",
+      name: "botdiscord",
       script: "./dist/index.js",
       watch: false,
       autorestart: true,
@@ -11,8 +11,6 @@ export default {
       },
       error_file: "./logs/err.log",
       out_file: "./logs/out.log",
-      merge_logs: true,
-      log_date_format: "YYYY-MM-DD HH:mm:ss"
     }
   ]
 };
