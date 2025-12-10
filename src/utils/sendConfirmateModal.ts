@@ -9,13 +9,20 @@ import {
 export default async function sendConfirmationModal(users: User[] | GuildMember[]) {
     console.info(`📩 Sending confirmation modal to users`);
 
-    const button = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    const applyButton = new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder()
     .setCustomId("open_confirmation_modal")
     .setLabel("Abrir formulario")
     .setEmoji("📝")
     .setStyle(ButtonStyle.Secondary)
+    );
 
+    const deniedButton = new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+    .setCustomId("open_denied_confirmation_modal")
+    .setLabel("No deseo participar")
+    .setEmoji("❌")
+    .setStyle(ButtonStyle.Danger)
     );
 
     for (const user of users) {
@@ -34,7 +41,7 @@ export default async function sendConfirmationModal(users: User[] | GuildMember[
 
             await user.send({
                 embeds: [embed],
-                components: [button]
+                components: [applyButton, deniedButton]
             });
             console.info(`📩 Message sent to ${user.displayName}`);
         } catch (e) {

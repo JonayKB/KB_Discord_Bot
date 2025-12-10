@@ -22,7 +22,7 @@ export default {
         const response = interaction.fields.getTextInputValue("confirmation_input");
 
 
-        console.info(`📝 Response of ${interaction.user.tag}: ${response}`);
+        console.info(`📝 Response of confirmation from ${interaction.user.tag}: ${response}`);
         try {
             let data: Record<string, string> = {};
             try {

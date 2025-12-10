@@ -63,7 +63,8 @@ async function sendConfirmationModalToMembers() {
 
         const membersToSend = allMembers.filter(member =>
             !member.user.bot &&
-            !member.roles.cache.has(ROL_NOT_TO_SEND_ID)
+            !member.roles.cache.has(ROL_NOT_TO_SEND_ID) &&
+            !member.roles.cache.has(ROL_IGNORE_ID)
         ).map(m => m.user);
 
         await sendConfirmationModal(membersToSend);
@@ -85,6 +86,7 @@ client.login(TOKEN);
 console.info("✅ Bot is running...");
 
 const ROL_NOT_TO_SEND_ID = "1371833331800346725";
+const ROL_IGNORE_ID = "1448303235285909605";
 
 client.once('clientReady', async () => {
     if (!client.user) return;
@@ -96,6 +98,7 @@ client.once('clientReady', async () => {
 
     preloadMessages(client);
     updateConfirmationMessage(client);
+
     try {
         const timezone = process.env.TIMEZONE ?? 'Europe/Madrid'; // optional, set e.g. 'Europe/Madrid'
         const options = timezone ? { scheduled: true, timezone } : { scheduled: true };
