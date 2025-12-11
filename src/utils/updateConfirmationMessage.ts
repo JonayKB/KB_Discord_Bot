@@ -33,10 +33,9 @@ export default async function updateConfirmationsMessage(client: Client, retry =
             return;
         }
 
-        const incluidos = rol.members.size;
-        const genteString = Array.from(rol.members.values())
-            .map((m) => m.user.globalName ?? m.user.username)
-            .join('\n');
+        const includedAmount = rol.members.size;
+        const members = Array.from(rol.members.values()).map(m => m.toString());
+        const columns = splitIntoColumns(members, 2);
 
         const canal = await guild.channels.fetch(cfg.canalID);
         if (!canal || !('messages' in canal) || canal.messages === undefined) {
@@ -45,7 +44,7 @@ export default async function updateConfirmationsMessage(client: Client, retry =
         }
 
         let mensaje = canal.messages.cache.get(cfg.mensajeID) ?? await canal.messages.fetch(cfg.mensajeID);
-        const embed = buildConfirmationEmbed(genteString, incluidos, guild.memberCount);
+        const embed = buildConfirmationEmbed(columns, includedAmount, guild.memberCount);
         await mensaje.edit({ embeds: [embed] });
         logger.info('✅ Confirmation message updated successfully.');
         retryTimeout = undefined;
@@ -53,15 +52,34 @@ export default async function updateConfirmationsMessage(client: Client, retry =
         handleUpdateError(error, client);
     }
 }
+function splitIntoColumns<T>(array: T[], columns: number): T[][] {
+    const perColumn = Math.ceil(array.length / columns);
+    const result: T[][] = [];
+    for (let i = 0; i < columns; i++) {
+        result.push(array.slice(i * perColumn, (i + 1) * perColumn));
+    }
+    return result;
+}
 
-function buildConfirmationEmbed(genteString: string, incluidos: number, memberCount: number) {
-    return new EmbedBuilder()
+function buildConfirmationEmbed(columnas: string[][], incluidos: number, memberCount: number) {
+    const embed = new EmbedBuilder()
         .setTitle('📊 Cantidad de Personas QUE HAN CONFIRMADO:')
-        .setDescription(`\n\n ** Confirmados:** ${genteString}\n\n ** Total de personas que han confirmado:** ${incluidos}`)
+        .setDescription(`**Total de personas que han confirmado:** ${incluidos}`)
         .setColor(0x27f720)
         .setFooter({ text: 'Actualizado automáticamente para ' + memberCount + ' personas' })
         .setTimestamp();
+
+    columnas.forEach((col, idx) => {
+        embed.addFields({
+            name: ``,
+            value: col.length > 0 ? col.join('\n') : '—',
+            inline: true,
+        });
+    });
+
+    return embed;
 }
+
 
 function handleUpdateError(error: any, client: Client) {
     const opcode = error?.data?.opcode;
