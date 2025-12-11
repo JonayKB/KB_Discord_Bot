@@ -109,7 +109,7 @@ client.once('clientReady', async () => {
     // Send confirmation message every day at 18:00
     try {
         cron.schedule('0 18 * * *', sendConfirmationModalToMembers, options);
-        logger.info('⏰ Confirmation modal cron scheduled: every 2 days at 18:00');
+        logger.info('⏰ Confirmation modal cron scheduled: every day at 18:00');
     } catch (err: any) {
         logger.error('❌ Failed to schedule confirmation modal cron:', err);
     }
