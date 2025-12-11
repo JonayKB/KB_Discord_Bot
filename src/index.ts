@@ -16,7 +16,7 @@ config.config();
 const logger = new Logger("Index");
 
 
-const timezone = process.env.TIMEZONE ?? 'Europe/Madrid'; // optional, set e.g. 'Europe/Madrid'
+const timezone = process.env.TIMEZONE ?? 'Europe/Madrid';
 const options = timezone ? { scheduled: true, timezone } : { scheduled: true };
 
 async function preloadMessages(client: Client) {
@@ -106,8 +106,9 @@ client.once('clientReady', async () => {
     preloadMessages(client);
     updateConfirmationMessage(client);
 
+    // Send confirmation message every day at 18:00
     try {
-        cron.schedule('0 18 */2 * *', sendConfirmationModalToMembers, options);
+        cron.schedule('0 18 * * *', sendConfirmationModalToMembers, options);
         logger.info('⏰ Confirmation modal cron scheduled: every 2 days at 18:00');
     } catch (err: any) {
         logger.error('❌ Failed to schedule confirmation modal cron:', err);
