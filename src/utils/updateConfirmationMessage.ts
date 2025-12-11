@@ -61,15 +61,15 @@ function splitIntoColumns<T>(array: T[], columns: number): T[][] {
     return result;
 }
 
-function buildConfirmationEmbed(columnas: string[][], incluidos: number, memberCount: number) {
+function buildConfirmationEmbed(columns: string[][], includedAmount: number, memberCount: number) {
     const embed = new EmbedBuilder()
         .setTitle('📊 Cantidad de Personas QUE HAN CONFIRMADO:')
-        .setDescription(`**Total de personas que han confirmado:** ${incluidos}`)
+        .setDescription(`**Total de personas que han confirmado:** ${includedAmount}`)
         .setColor(0x27f720)
         .setFooter({ text: 'Actualizado automáticamente para ' + memberCount + ' personas' })
         .setTimestamp();
 
-    columnas.forEach((col, idx) => {
+    columns.forEach((col) => {
         embed.addFields({
             name: ``,
             value: col.length > 0 ? col.join('\n') : '—',
