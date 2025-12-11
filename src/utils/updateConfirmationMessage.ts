@@ -34,8 +34,8 @@ export default async function updateConfirmationsMessage(client: Client, retry =
         }
 
         const includedAmount = rol.members.size;
-        const members = Array.from(rol.members.values()).map(m => m.toString());
-        const columns = splitIntoColumns(members, 2);
+        const members = rol.members.map(m => m.user.globalName ?? m.user.username);
+        const memberString = members.join('\n');
 
         const canal = await guild.channels.fetch(cfg.canalID);
         if (!canal || !('messages' in canal) || canal.messages === undefined) {
@@ -44,7 +44,7 @@ export default async function updateConfirmationsMessage(client: Client, retry =
         }
 
         let mensaje = canal.messages.cache.get(cfg.mensajeID) ?? await canal.messages.fetch(cfg.mensajeID);
-        const embed = buildConfirmationEmbed(columns, includedAmount, guild.memberCount);
+        const embed = buildConfirmationEmbed(memberString, includedAmount, guild.memberCount);
         await mensaje.edit({ embeds: [embed] });
         logger.info('✅ Confirmation message updated successfully.');
         retryTimeout = undefined;
@@ -52,16 +52,9 @@ export default async function updateConfirmationsMessage(client: Client, retry =
         handleUpdateError(error, client);
     }
 }
-function splitIntoColumns<T>(array: T[], columns: number): T[][] {
-    const perColumn = Math.ceil(array.length / columns);
-    const result: T[][] = [];
-    for (let i = 0; i < columns; i++) {
-        result.push(array.slice(i * perColumn, (i + 1) * perColumn));
-    }
-    return result;
-}
 
-function buildConfirmationEmbed(columns: string[][], includedAmount: number, memberCount: number) {
+
+function buildConfirmationEmbed(memberString: string, includedAmount: number, memberCount: number) {
     const embed = new EmbedBuilder()
         .setTitle('📊 Cantidad de Personas QUE HAN CONFIRMADO:')
         .setDescription(`**Total de personas que han confirmado:** ${includedAmount}`)
@@ -69,13 +62,11 @@ function buildConfirmationEmbed(columns: string[][], includedAmount: number, mem
         .setFooter({ text: 'Actualizado automáticamente para ' + memberCount + ' personas' })
         .setTimestamp();
 
-    columns.forEach((col) => {
         embed.addFields({
             name: ``,
-            value: col.length > 0 ? col.join('\n') : '—',
+            value: memberString || '*Nadie ha confirmado aún*',
             inline: true,
         });
-    });
 
     return embed;
 }
