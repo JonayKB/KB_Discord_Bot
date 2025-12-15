@@ -135,6 +135,7 @@ client.once('clientReady', async () => {
     updateInfoMessage(client);
 
 
+
     // Update info message every 30 seconds
     setInterval(async () => {
         updateInfoMessage(client);
