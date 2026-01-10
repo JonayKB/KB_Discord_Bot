@@ -32,7 +32,7 @@ export default async function sendConfirmationModal(users: User[] | GuildMember[
                 .setColor('#3B82F6')
                 .setTitle('✨ Confirmación de Participación')
                 .setDescription(
-                    `Para unirte al servidor de HYTALE, completa el formulario usando el botón de abajo.
+                    `Para unirte al servidor de **HYTALE**, completa el formulario usando el botón de abajo.
 
                     **Requisito:** Usuario de HYTALE.`
                 )
