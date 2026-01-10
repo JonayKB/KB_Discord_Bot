@@ -32,9 +32,9 @@ export default async function sendConfirmationModal(users: User[] | GuildMember[
                 .setColor('#3B82F6')
                 .setTitle('✨ Confirmación de Participación')
                 .setDescription(
-                    `Para unirte al servidor de Minecraft, completa el formulario usando el botón de abajo.  
-        
-                    **Requisito:** Usuario de Minecraft.`
+                    `Para unirte al servidor de HYTALE, completa el formulario usando el botón de abajo.
+
+                    **Requisito:** Usuario de HYTALE.`
                 )
                 .setTimestamp()
                 .setFooter({ text: 'Sistema automático de confirmación' });

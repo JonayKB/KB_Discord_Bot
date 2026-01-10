@@ -137,9 +137,9 @@ client.once('clientReady', async () => {
 
 
     // Update info message every 30 seconds
-    setInterval(async () => {
-        updateInfoMessage(client);
-    }, 30 * 1000);
+    // setInterval(async () => {
+    //     updateInfoMessage(client);
+    // }, 30 * 1000);
 
     // Compress logs every day at midnight
     try {
