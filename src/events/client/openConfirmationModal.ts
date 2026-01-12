@@ -19,7 +19,7 @@ export default {
 
         const input = new TextInputBuilder()
             .setCustomId("confirmation_input")
-            .setLabel("Escribe tu nombre de usuario en Minecraft")
+            .setLabel("Escribe tu nombre de usuario en Hytale")
             .setStyle(TextInputStyle.Short);
 
         const row = new ActionRowBuilder<TextInputBuilder>().addComponents(input);
