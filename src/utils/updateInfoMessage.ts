@@ -6,6 +6,9 @@ import { Logger } from "./Logger";
 import fs from "node:fs";
 import path from "node:path";
 import fetchHytaleServerData from "./hytaleServerData";
+import { ServerStats } from "../types/informationType";
+const { SERVER_TYPE } = process.env;
+
 const logger = new Logger("UpdateInfoMessage");
 configDotenv();
 enum colorCode {
@@ -33,34 +36,46 @@ function createPlayersBar(playersOnline: number, maxPlayers: number): string {
     return full + empty;
 }
 
-function getPlayersDiscordsMentions(playerList: { name: string }[], guild: any): {minecraft:string,mention:string|null}[] {
-    const mentions: {minecraft:string,mention:string|null}[] = [];
+function getPlayersDiscordsMentions(playerList: { name: string }[], guild: any): { minecraft: string, mention: string | null }[] {
+    const mentions: { minecraft: string, mention: string | null }[] = [];
     for (const player of playerList) {
         let discordName = player.name;
         try {
             const namesPath = path.join(process.cwd(), "data", "names.json");
             if (fs.existsSync(namesPath)) {
-            const raw = fs.readFileSync(namesPath, "utf8");
-            const namesMap: Record<string, string> = JSON.parse(raw);
-            const match = Object.entries(namesMap).find(([, mcName]) => mcName === player.name);
-            if (match) discordName = match[0];
+                const raw = fs.readFileSync(namesPath, "utf8");
+                const namesMap: Record<string, string> = JSON.parse(raw);
+                const match = Object.entries(namesMap).find(([, mcName]) => mcName === player.name);
+                if (match) discordName = match[0];
             }
         } catch {
             discordName = player.name;
         }
         const member = guild.members.cache.find((m: GuildMember) => m.user.username === discordName);
         if (member) {
-            mentions.push({minecraft: player.name, mention: member.toString()});
+            mentions.push({ minecraft: player.name, mention: member.toString() });
         } else {
-            mentions.push({minecraft: player.name, mention: null});
+            mentions.push({ minecraft: player.name, mention: null });
         }
     }
     return mentions;
 }
 
 export default async function updateInfoMessage(client: Client) {
-    const data = await fetchHytaleServerData();
     const config = loadConfig();
+    let data: ServerStats | null = null;
+
+    switch (SERVER_TYPE) {
+        case ServerType.Hytale:
+            data = await fetchHytaleServerData();
+            break;
+        case ServerType.Minecraft:
+            data = await fetchMcServerData();
+            break;
+        default:
+            break;
+    }
+
     if (!config.canalInfoID || !config.mensajeInfoID) return;
 
     let embed;
@@ -127,7 +142,7 @@ export default async function updateInfoMessage(client: Client) {
                 {
                     name: "🧑‍🚀 Lista de jugadores",
                     value: data.playerList.length > 0
-                        ? getPlayersDiscordsMentions(data.playerList, guild).map(p=> `${p.minecraft} (${p.mention || "???"})`).join("\n")
+                        ? getPlayersDiscordsMentions(data.playerList, guild).map(p => `${p.minecraft} (${p.mention || "???"})`).join("\n")
                         : "*No hay jugadores conectados*"
                 }
             )
