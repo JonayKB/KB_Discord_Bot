@@ -5,6 +5,7 @@ import { configDotenv } from "dotenv";
 import { Logger } from "./Logger";
 import fs from "node:fs";
 import path from "node:path";
+import fetchHytaleServerData from "./hytaleServerData";
 const logger = new Logger("UpdateInfoMessage");
 configDotenv();
 enum colorCode {
@@ -58,7 +59,7 @@ function getPlayersDiscordsMentions(playerList: { name: string }[], guild: any):
 }
 
 export default async function updateInfoMessage(client: Client) {
-    const data = await fetchMcServerData();
+    const data = await fetchHytaleServerData();
     const config = loadConfig();
     if (!config.canalInfoID || !config.mensajeInfoID) return;
 

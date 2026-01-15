@@ -1,5 +1,6 @@
 const { MINECRAFT_SERVER_IP, MINECRAFT_SERVER_PORT, MINECRAFT_API_PORT } = process.env;
 import { status } from 'minecraft-server-util';
+import { ServerStats } from '../types/informationType';
 
 interface SparkRestResponse {
     tps_10s: number;
@@ -33,7 +34,7 @@ export default function fetchMcServerData() {
                     playersOnline: status.players.online,
                     maxPlayers: status.players.max,
                     playerList: status.players.sample ?? []
-                };
+                } as ServerStats;
             }).catch(() => {
                 return null;
             });
