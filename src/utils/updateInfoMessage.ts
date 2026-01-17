@@ -118,7 +118,7 @@ export default async function updateInfoMessage(client: Client) {
         const guild = client.guilds.cache.get(process.env.GUILD_ID!);
         embed = new EmbedBuilder()
             .setColor("#00AAFF")
-            .setTitle("📊 Estado del Servidor")
+            .setTitle("📊 Estado del Servidor de "+SERVER_TYPE)
             .addFields(
                 {
                     name: "⚡ TPS",
