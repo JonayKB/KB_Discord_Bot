@@ -7,6 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import fetchHytaleServerData from "./hytaleServerData";
 import { ServerStats } from "../types/informationType";
+import ServerType from "../types/serverType";
 const { SERVER_TYPE } = process.env;
 
 const logger = new Logger("UpdateInfoMessage");
