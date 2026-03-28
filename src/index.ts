@@ -107,12 +107,12 @@ client.once('clientReady', async () => {
     updateConfirmationMessage(client);
 
     // Send confirmation message every day at 18:00
-    try {
-        cron.schedule('0 18 * * *', sendConfirmationModalToMembers, options);
-        logger.info('⏰ Confirmation modal cron scheduled: every day at 18:00');
-    } catch (err: any) {
-        logger.error('❌ Failed to schedule confirmation modal cron:', err);
-    }
+    // try {
+    //     cron.schedule('0 18 * * *', sendConfirmationModalToMembers, options);
+    //     logger.info('⏰ Confirmation modal cron scheduled: every day at 18:00');
+    // } catch (err: any) {
+    //     logger.error('❌ Failed to schedule confirmation modal cron:', err);
+    // }
 
     // Set random activity status every X minutes
     const timeInterval = 5;
