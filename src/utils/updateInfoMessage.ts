@@ -142,7 +142,7 @@ export default async function updateInfoMessage(client: Client) {
                 },
                 {
                     name: "🧑‍🚀 Lista de jugadores",
-                    value: data.playerList.length > 0
+                    value: data.playerList?.length > 0
                         ? getPlayersDiscordsMentions(data.playerList, guild).map(p => `${p.minecraft} (${p.mention || "???"})`).join("\n")
                         : "*No hay jugadores conectados*"
                 }
