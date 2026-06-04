@@ -1,6 +1,7 @@
 const { MINECRAFT_SERVER_IP, MINECRAFT_SERVER_PORT, MINECRAFT_API_PORT } = process.env;
 import { status } from 'minecraft-server-util';
 import { ServerStats } from '../types/informationType';
+import { Logger } from './Logger';
 
 interface SparkRestResponse {
     tps_10s: number;
@@ -11,6 +12,7 @@ interface SparkRestResponse {
     cpu: number;
 }
 
+const logger = new Logger("FetchMcServerData");
 
 export default function fetchMcServerData() {
 
@@ -35,7 +37,8 @@ export default function fetchMcServerData() {
                     maxPlayers: status.players.max,
                     playerList: status.players.sample ?? []
                 } as ServerStats;
-            }).catch(() => {
+            }).catch((error) => {
+                logger.error('Error fetching server status:', error);
                 return null;
             });
 
@@ -43,6 +46,7 @@ export default function fetchMcServerData() {
 
         })
         .catch(error => {
+            logger.error('Error fetching metrics:', error);
             return null;
         });
 
