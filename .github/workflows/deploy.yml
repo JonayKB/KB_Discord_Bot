@@ -15,7 +15,7 @@ jobs:
             host: ${{ vars.SSH_HOST }} 
             username: ${{ vars.SSH_USER }}
             password: ${{ secrets.SSH_PASSWORD }}
-            port: 22
+            port: 6454
             script: |
                 cd KB_Discord_Bot/
                 git pull
