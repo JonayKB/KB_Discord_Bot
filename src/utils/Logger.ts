@@ -4,7 +4,7 @@ import path from "node:path";
 type LogLevel = "debug" | "info" | "warn" | "error";
 
 export class Logger {
-    private readonly logDir = path.resolve("logs");
+    private readonly logDir = path.resolve(__dirname, "../../logs");
     private readonly outFile = path.join(this.logDir, "out.log");
     private readonly errorFile = path.join(this.logDir, "error.log");
 

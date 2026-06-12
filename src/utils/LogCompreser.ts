@@ -6,7 +6,7 @@ const DAYS_TO_KEEP = 3;
 
 
 export default function compressOldLogs() {
-    const logDir = path.resolve("logs");
+    const logDir = path.resolve(__dirname, "../../logs");
     const filesToCompress = ["out.log", "error.log"];
 
     if (!fs.existsSync(logDir)) return;
