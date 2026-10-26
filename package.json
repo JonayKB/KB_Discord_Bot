@@ -4,23 +4,36 @@
   "type": "commonjs",
   "scripts": {
     "dev": "ts-node-dev --respawn src/index.ts",
-    "build": "tsc",
-    "start": "pm2 start dist/index.js --name botdiscord",
+    "dev:web": "npm --prefix web run dev",
+    "build": "tsc && npm run build:web",
+    "build:web": "npm --prefix web install --no-audit --no-fund && npm --prefix web run build",
+    "start": "pm2 start ecosystem.config.js",
     "stop": "pm2 stop botdiscord",
     "restart": "pm2 restart botdiscord",
-    "deploy": "npm run build && pm2 reload botdiscord",
+    "deploy": "npm run build && pm2 reload botdiscord --update-env",
     "status": "pm2 status botdiscord",
     "monitor": "pm2 monit",
-    "logs": "pm2 logs botdiscord --lines 1000"
+    "logs": "pm2 logs botdiscord --lines 1000",
+    "smoke": "ts-node --transpile-only scripts/smoke-test.ts",
+    "demo": "ts-node --transpile-only scripts/demo-panel.ts"
   },
   "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "croner": "^11.0.0",
     "discord.js": "^14.25.1",
     "dotenv": "^16.5.0",
+    "express": "^5.3.0",
     "minecraft-server-util": "^5.4.4",
-    "node-cron": "^4.2.1",
-    "pm2": "^6.0.14"
+    "multer": "^2.5.0",
+    "pm2": "^6.0.14",
+    "ws": "^8.22.0"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/express": "^5.0.6",
+    "@types/multer": "^2.3.0",
+    "@types/node": "^22.20.5",
+    "@types/ws": "^8.18.2",
     "ts-node": "^10.9.1",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.9.3"

@@ -1,6 +1,5 @@
 import type { Client, User } from 'discord.js';
 import { loadConfig } from '../../utils/configManager';
-import updateConfirmationMessage from '../../utils/updateConfirmationMessage';
 import type { ReactionData } from '../../types/reactionData';
 import { Logger } from '../../utils/Logger';
 
@@ -21,7 +20,6 @@ export default {
         if (rol && member.roles.cache.has(rol.id)) {
             await member.roles.remove(rol);
             logger.info(`➖ Rol ${rol.name} removed from ${user.tag} successfully.`);
-            await updateConfirmationMessage(client);
         }
     }
 }

@@ -143,3 +143,13 @@ names.json
 denied_reasons.json
 
 *.env
+
+# Panel web
+web/node_modules/
+web/dist/
+
+# Datos del bot (base de datos e imágenes subidas/recibidas)
+data/bot.db
+data/bot.db-shm
+data/bot.db-wal
+data/uploads/

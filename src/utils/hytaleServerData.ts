@@ -1,3 +1,4 @@
+import https from "node:https";
 import { PlayerInfo, ServerStats } from "../types/informationType";
 
 const { HYTALE_SERVER_IP, HYTALE_API_PORT } = process.env;
@@ -22,15 +23,34 @@ interface Server {
   ProtocolHash: string;
   MaxPlayers: number;
 }
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+
+// El servidor de Hytale usa un certificado autofirmado. Antes se desactivaba la verificación TLS
+// de TODO el proceso (NODE_TLS_REJECT_UNAUTHORIZED=0), lo que también afectaría al login con Discord
+// del panel. Ahora solo se relaja para esta petición concreta.
+const insecureAgent = new https.Agent({ rejectUnauthorized: false });
+
+function getJsonInsecure<T>(url: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, { agent: insecureAgent, timeout: 5000 }, res => {
+      if (!res.statusCode || res.statusCode < 200 || res.statusCode >= 300) {
+        res.resume();
+        reject(new Error(`HTTP error! status: ${res.statusCode}`));
+        return;
+      }
+      const chunks: Buffer[] = [];
+      res.on("data", c => chunks.push(c));
+      res.on("end", () => {
+        try { resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")) as T); } catch (e) { reject(e); }
+      });
+    });
+    req.on("timeout", () => req.destroy(new Error("timeout")));
+    req.on("error", reject);
+  });
+}
 
 export default async function fetchHytaleServerData(): Promise<ServerStats | null> {
   try {
-    const response = await fetch(`https://${HYTALE_SERVER_IP}:${HYTALE_API_PORT}/Nitrado/Query`);
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-    const data: HytaleServerData = await response.json();
+    const data = await getJsonInsecure<HytaleServerData>(`https://${HYTALE_SERVER_IP}:${HYTALE_API_PORT}/Nitrado/Query`);
     return {
         "cpu": 0,
         "playersOnline": data.Players.length,

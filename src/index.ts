@@ -1,34 +1,50 @@
+import { env } from "./core/config";
 import { ActivityType, Client, GatewayIntentBits, Partials } from "discord.js";
+import { Cron } from "croner";
 
-import config from 'dotenv';
 import loadCommands from './commands/index';
 import loadEvents from './events/index';
 import { loadConfig } from './utils/configManager';
-import updateConfirmationMessage from './utils/updateConfirmationMessage';
-import sendConfirmationModal from "./utils/sendConfirmateModal";
-import cron from 'node-cron';
 import updateInfoMessage from "./utils/updateInfoMessage";
 import { Logger } from "./utils/Logger";
 import compressLogs from "./utils/LogCompreser";
-const { GUILD_ID = 'NO_GUILD_ID', TOKEN } = process.env;
-config.config();
 
+import { openDb } from "./core/db";
+import { startLogCapture } from "./core/logs";
+import { ModuleManager } from "./core/module";
+import { setServices } from "./core/services";
+import { migrateLegacy } from "./core/migrateLegacy";
+import { startWebServer } from "./web/server";
+
+import { MessagesService, createMessagesModule } from "./modules/messages";
+import { InboxService, createInboxModule } from "./modules/inbox";
+import { ConfirmationService } from "./modules/confirmations/service";
+import { createConfirmationsModule } from "./modules/confirmations";
+import { SchedulerService } from "./modules/scheduler/service";
+import { createSchedulerModule } from "./modules/scheduler";
+
+startLogCapture();
 const logger = new Logger("Index");
 
-
-const timezone = process.env.TIMEZONE ?? 'Europe/Madrid';
-const options = timezone ? { scheduled: true, timezone } : { scheduled: true };
+// Un error inesperado en una promesa no debe tumbar el bot entero.
+process.on('unhandledRejection', (reason) => logger.error('Unhandled rejection', reason));
+process.on('uncaughtException', (err) => logger.error('Uncaught exception', err));
 
 async function preloadMessages(client: Client) {
     const config = loadConfig();
     if (!config.reactions || config.reactions.length === 0) return;
     for (const r of config.reactions) {
-        const channel = await client.channels.fetch(r.canalID);
-        if (!channel || !('messages' in channel)) continue;
-        await channel.messages.fetch(r.mensajeID);
+        try {
+            const channel = await client.channels.fetch(r.canalID);
+            if (!channel || !('messages' in channel)) continue;
+            await channel.messages.fetch(r.mensajeID);
+        } catch (err) {
+            logger.error(`No se pudo precargar el mensaje de reacciones ${r.mensajeID}`, err);
+        }
     }
     logger.info("✅ All reaction messages preloaded");
 }
+
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -41,6 +57,7 @@ const client = new Client({
     ],
     partials: [Partials.Message, Partials.Channel, Partials.Reaction]
 });
+
 const activities = [
     { name: "🛠️ Configurando el servidor", type: ActivityType.Competing },
     { name: "🐉 MCKBServers en construcción", type: ActivityType.Playing },
@@ -54,65 +71,53 @@ const activities = [
     { name: "🔧 Mantenimiento del servidor", type: ActivityType.Playing },
     { name: "📊 Analizando datos", type: ActivityType.Watching }
 ];
-async function sendConfirmationModalToMembers() {
-    try {
-        const guild = client.guilds.cache.get(GUILD_ID);
-        if (!guild) {
-            logger.error('❌ Guild not found');
-            return;
-        }
-        const allMembers = guild.members.cache;
-        if (!allMembers) {
-            logger.error('❌ Cannot fetch guild members');
-            return;
-        }
 
-        const membersToSend = allMembers.filter(member =>
-            !member.user.bot &&
-            !member.roles.cache.has(ROL_NOT_TO_SEND_ID) &&
-            !member.roles.cache.has(ROL_IGNORE_ID)
-        ).map(m => m.user);
+// ───────────── Base de datos, servicios y módulos ─────────────
+const db = openDb();
+const manager = new ModuleManager(client, db);
 
-        await sendConfirmationModal(membersToSend);
-        logger.info('✅ Confirmation modal sent by cron job');
-    } catch (err: any) {
-        logger.error('❌ Error sending confirmation modal in cron job:', err);
-    }
-}
-// Register commands
+const messages = new MessagesService(client, db);
+const confirmations = new ConfirmationService(client, db, messages);
+const inbox = new InboxService(db, messages);
+const scheduler = new SchedulerService(db, messages, confirmations);
+setServices({ messages, confirmations });
+
+manager.register(createMessagesModule(messages, db));
+manager.register(createInboxModule(inbox, messages, db));
+manager.register(createSchedulerModule(scheduler));
+manager.register(createConfirmationsModule(confirmations));
+
+// ───────────── Código "clásico" (info del servidor, roles por reacción, bienvenida) ─────────────
 loadCommands(client);
-
-
-
-// Register events
 loadEvents(client);
 
-client.login(TOKEN);
+// ───────────── Panel web ─────────────
+const server = env.panel.enabled ? startWebServer({ client, db, manager }) : null;
 
-logger.info("✅ Bot is running...");
+if (!env.token) logger.error('❌ Falta TOKEN en el .env: el bot no puede conectarse a Discord.');
+client.login(env.token).catch(err => logger.error('❌ No se pudo iniciar sesión en Discord', err));
+logger.info("✅ Bot is starting...");
 
-const ROL_NOT_TO_SEND_ID = "1371833331800346725";
-const ROL_IGNORE_ID = "1448303235285909605";
+const cronOptions = { timezone: env.timezone };
 
 // On client ready
 client.once('clientReady', async () => {
     if (!client.user) return;
 
-    const guild = await client.guilds.fetch(GUILD_ID);
+    const guild = await client.guilds.fetch(env.guildId);
     await guild.members.fetch();
     logger.info("👥 All guild members fetched");
     logger.info(`🤖 Logged in as ${client.user.tag}`);
 
-    preloadMessages(client);
-    updateConfirmationMessage(client);
-
-    // Send confirmation message every day at 14:00
+    // Migra una sola vez la configuración antigua a la base de datos y arranca los módulos activos.
     try {
-        cron.schedule('0 14 * * *', sendConfirmationModalToMembers, options);
-        logger.info('⏰ Confirmation modal cron scheduled: every 3 days at 14:00');
-    } catch (err: any) {
-        logger.error('❌ Failed to schedule confirmation modal cron:', err);
+        migrateLegacy(db);
+    } catch (err) {
+        logger.error('❌ Falló la migración de datos antiguos', err);
     }
+    await manager.startEnabled();
+
+    preloadMessages(client);
 
     // Set random activity status every X minutes
     const timeInterval = 5;
@@ -130,26 +135,33 @@ client.once('clientReady', async () => {
         });
     }, timeInterval * 60 * 1000);
 
-
-    // Initial update of info message
-    updateInfoMessage(client);
-
-
-
-    // Update info message every 30 seconds
-    setInterval(async () => {
-        updateInfoMessage(client);
-    }, 30 * 1000);
+    // Info message: initial update and then every 30 seconds
+    const refreshInfo = () => updateInfoMessage(client).catch(err => logger.error('Error actualizando el mensaje de estado', err));
+    refreshInfo();
+    setInterval(refreshInfo, 30 * 1000);
 
     // Compress logs every day at midnight
     try {
-        cron.schedule('0 0 * * *', async () => {
-            compressLogs();
-        }, options);
+        new Cron('0 0 * * *', cronOptions, () => {
+            try { compressLogs(); } catch (err) { logger.error('❌ Error compressing logs:', err); }
+        });
         logger.info('⏰ Log compression cron scheduled: daily at midnight');
     } catch (err: any) {
-        logger.error('❌ Error compressing logs:', err);
+        logger.error('❌ Failed to schedule log compression:', err);
     }
-
 });
 
+// ───────────── Apagado limpio (pm2 reload / Ctrl+C) ─────────────
+let closing = false;
+async function shutdown(signal: string) {
+    if (closing) return;
+    closing = true;
+    logger.info(`🛑 ${signal} recibido, cerrando…`);
+    scheduler.stop();
+    server?.close();
+    await client.destroy();
+    db.close();
+    process.exit(0);
+}
+process.on('SIGINT', () => void shutdown('SIGINT'));
+process.on('SIGTERM', () => void shutdown('SIGTERM'));

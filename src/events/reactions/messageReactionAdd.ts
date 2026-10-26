@@ -2,7 +2,6 @@ import type { Client, User } from "discord.js";
 import type { ReactionData } from "../../types/reactionData";
 
 import { loadConfig } from '../../utils/configManager';
-import updateConfirmationMessage from '../../utils/updateConfirmationMessage';
 import { Logger } from '../../utils/Logger';
 
 const logger = new Logger("MessageReactionAdd");
@@ -22,7 +21,6 @@ export default {
         if (rol && !member.roles.cache.has(rol.id)) {
             await member.roles.add(rol);
             logger.info(`➕ Rol ${rol.name} assigned to ${user.tag} successfully.`);
-            await updateConfirmationMessage(client);
         }
     }
 }

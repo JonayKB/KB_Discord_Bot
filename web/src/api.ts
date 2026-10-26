@@ -1,0 +1,179 @@
+export class ApiError extends Error {
+    constructor(public status: number, message: string) {
+        super(message);
+    }
+}
+
+export async function api<T = unknown>(method: string, url: string, body?: unknown): Promise<T> {
+    const res = await fetch(`/api${url}`, {
+        method,
+        credentials: 'same-origin',
+        headers: {
+            'X-Requested-With': 'kb-panel',
+            ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+        },
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+    if (res.status === 401) window.dispatchEvent(new Event('kb:unauthorized'));
+    const text = await res.text();
+    let data: unknown = null;
+    try { data = text ? JSON.parse(text) : null; } catch { /* no es JSON */ }
+    if (!res.ok) {
+        const msg = (data as { error?: string } | null)?.error ?? `Error ${res.status}`;
+        throw new ApiError(res.status, msg);
+    }
+    return data as T;
+}
+
+export const get = <T,>(url: string) => api<T>('GET', url);
+export const post = <T,>(url: string, body?: unknown) => api<T>('POST', url, body ?? {});
+export const put = <T,>(url: string, body?: unknown) => api<T>('PUT', url, body ?? {});
+export const del = <T,>(url: string) => api<T>('DELETE', url);
+
+export async function uploadFiles(files: File[]): Promise<FileInfo[]> {
+    const fd = new FormData();
+    for (const f of files) fd.append('files', f, f.name);
+    const res = await fetch('/api/files', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'X-Requested-With': 'kb-panel' },
+        body: fd,
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new ApiError(res.status, data?.error ?? `Error ${res.status}`);
+    return data as FileInfo[];
+}
+
+// ───────────────────────────── Tipos compartidos ─────────────────────────────
+
+export interface FileInfo {
+    id: string;
+    name: string;
+    mime: string;
+    size: number;
+    isImage: boolean;
+    url: string;
+}
+
+export interface EmbedData {
+    title?: string;
+    description?: string;
+    color?: string;
+    footer?: string;
+    author?: string;
+    thumbnail?: string;
+    timestamp?: boolean;
+}
+
+export interface Msg {
+    id: number;
+    direction: 'in' | 'out';
+    kind: 'dm' | 'channel';
+    userId: string | null;
+    userTag: string | null;
+    userAvatar: string | null;
+    channelId: string | null;
+    channelName: string | null;
+    content: string;
+    embed: EmbedData | null;
+    source: string;
+    sourceRef: string | null;
+    status: 'sent' | 'failed' | 'received';
+    error: string | null;
+    readAt: number | null;
+    createdAt: number;
+    files: FileInfo[];
+}
+
+export type Target =
+    | { type: 'user'; id: string }
+    | { type: 'users'; ids: string[] }
+    | { type: 'role'; id: string }
+    | { type: 'all' }
+    | { type: 'channel'; id: string };
+
+export interface Member { id: string; username: string; displayName: string; avatar: string }
+export interface Role { id: string; name: string; color: string; members: number; managed: boolean }
+export interface Channel { id: string; name: string; category: string | null }
+
+export interface Template {
+    id: number;
+    name: string;
+    content: string;
+    embed: EmbedData | null;
+    fileIds: string[];
+    files: FileInfo[];
+    updatedAt: number;
+}
+
+export interface ModuleInfo { id: string; name: string; description: string; enabled: boolean; running: boolean; error?: string }
+
+export interface Job {
+    id: number;
+    name: string;
+    enabled: boolean;
+    scheduleType: 'cron' | 'interval' | 'once';
+    schedule: string;
+    startAt: number | null;
+    timezone: string | null;
+    actionType: 'send_template' | 'send_campaign';
+    action: { templateId?: number; target?: Target; campaignId?: number };
+    lastRunAt: number | null;
+    lastStatus: string | null;
+    lastResult: string | null;
+    runCount: number;
+    nextRunAt: number | null;
+    running: boolean;
+}
+
+export interface Campaign {
+    id: number;
+    name: string;
+    enabled: boolean;
+    title: string;
+    description: string;
+    color: string;
+    confirmLabel: string;
+    denyLabel: string;
+    inputLabel: string;
+    allowDeny: boolean;
+    confirmedRoleId: string | null;
+    deniedRoleId: string | null;
+    excludeRoleIds: string[];
+    skipResponded: boolean;
+    sendOnJoin: boolean;
+    setNickname: boolean;
+    nicknameTemplate: string;
+    counterTitle: string;
+    counterChannelId: string | null;
+    counterMessageId: string | null;
+    legacy: boolean;
+}
+
+export interface Entry {
+    id: number;
+    campaignId: number;
+    userId: string;
+    username: string | null;
+    displayName: string | null;
+    answer: string | null;
+    status: 'confirmed' | 'denied';
+    reason: string | null;
+    createdAt: number;
+    updatedAt: number;
+    inGuild: boolean;
+    hasRole: boolean;
+    unresolved: boolean;
+}
+
+export interface Status {
+    ready: boolean;
+    bot: { tag: string; avatar: string } | null;
+    guild: { id: string; name: string; icon: string | null; memberCount: number } | null;
+    uptimeMs: number;
+    wsPingMs: number;
+    modules: ModuleInfo[];
+    stats: { sent24h: number; failed24h: number; received24h: number; unread: number; activeJobs: number; confirmed: number };
+}
+
+export interface LogEntry { ts: string; level: 'debug' | 'info' | 'warn' | 'error'; scope?: string; message: string }

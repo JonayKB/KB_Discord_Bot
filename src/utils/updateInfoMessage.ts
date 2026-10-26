@@ -3,11 +3,10 @@ import fetchMcServerData from "./mcServerData";
 import { loadConfig } from "./configManager";
 import { configDotenv } from "dotenv";
 import { Logger } from "./Logger";
-import fs from "node:fs";
-import path from "node:path";
 import fetchHytaleServerData from "./hytaleServerData";
 import { ServerStats } from "../types/informationType";
 import ServerType from "../types/serverType";
+import { getServices } from "../core/services";
 const { SERVER_TYPE } = process.env;
 
 const logger = new Logger("UpdateInfoMessage");
@@ -42,17 +41,12 @@ function getPlayersDiscordsMentions(playerList: { name: string }[], guild: any):
     for (const player of playerList) {
         let discordName = player.name;
         try {
-            const namesPath = path.join(process.cwd(), "data", "names.json");
-            if (fs.existsSync(namesPath)) {
-                const raw = fs.readFileSync(namesPath, "utf8");
-                const namesMap: Record<string, string> = JSON.parse(raw);
-                const match = Object.entries(namesMap).find(([, mcName]) => mcName === player.name);
-                if (match) discordName = match[0];
-            }
+            // Antes se leía data/names.json; ahora las respuestas de confirmación están en la base de datos.
+            discordName = getServices().confirmations.usernameForAnswer(player.name) ?? player.name;
         } catch {
             discordName = player.name;
         }
-        const member = guild.members.cache.find((m: GuildMember) => m.user.username === discordName);
+        const member = guild?.members.cache.find((m: GuildMember) => m.user.username === discordName);
         if (member) {
             mentions.push({ minecraft: player.name, mention: member.toString() });
         } else {

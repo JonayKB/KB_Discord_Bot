@@ -1,7 +1,22 @@
 import fs from "node:fs";
 import path from "node:path";
 
-type LogLevel = "debug" | "info" | "warn" | "error";
+export type LogLevel = "debug" | "info" | "warn" | "error";
+
+export interface LogEntry {
+    ts: string;
+    level: LogLevel;
+    scope?: string;
+    message: string;
+}
+
+const listeners = new Set<(entry: LogEntry) => void>();
+
+/** Permite a otras partes (panel, buffer en memoria) recibir cada línea de log. */
+export function onLog(fn: (entry: LogEntry) => void): () => void {
+    listeners.add(fn);
+    return () => listeners.delete(fn);
+}
 
 export class Logger {
     private readonly logDir = path.resolve(__dirname, "../../logs");
@@ -14,7 +29,7 @@ export class Logger {
 
     private ensureLogFiles() {
         if (!fs.existsSync(this.logDir)) {
-            fs.mkdirSync(this.logDir);
+            fs.mkdirSync(this.logDir, { recursive: true });
         }
 
         if (!fs.existsSync(this.outFile)) {
@@ -76,6 +91,10 @@ export class Logger {
                 break;
         }
         this.writeToFile(level, raw);
+        const entry: LogEntry = { ts: this.timestamp(), level, scope: this.scope, message: String(msg) };
+        for (const fn of listeners) {
+            try { fn(entry); } catch { /* un listener roto no debe tumbar el bot */ }
+        }
     }
 
     debug(msg: unknown): void {
@@ -90,8 +109,10 @@ export class Logger {
         this.print("warn", msg);
     }
 
-    error(msg: unknown, err?: Error): void {
-        const fullMessage = err ? `${msg} | ${err.stack || err.message}` : msg;
+    error(msg: unknown, err?: unknown): void {
+        const detail = err instanceof Error ? (err.stack || err.message) : err !== undefined ? String(err) : "";
+        const base = msg instanceof Error ? (msg.stack || msg.message) : msg;
+        const fullMessage = detail ? `${base} | ${detail}` : base;
         this.print("error", fullMessage);
     }
 }
