@@ -79,3 +79,78 @@ export function startFakeSpark(port: number, tps = 19.84): http.Server {
         res.end(JSON.stringify({ tps_10s: tps, tps_1m: tps, tps_5m: 19.97, tps_15m: 19.99, mspt_1m: 12.4, cpu: 0.37 }));
     }).listen(port, '127.0.0.1');
 }
+
+/**
+ * Servidor RCON falso con whitelist (como un Minecraft con enable-rcon=true).
+ * `state.whitelist` guarda los nombres tal cual; `state.log` los comandos recibidos.
+ */
+export function startFakeRcon(port: number, password: string, state: { whitelist: string[]; log: string[]; known?: (name: string) => boolean }): net.Server {
+    const packet = (id: number, body: string) => {
+        const p = Buffer.from(body, 'utf8');
+        const b = Buffer.alloc(14 + p.length);
+        b.writeInt32LE(10 + p.length, 0); b.writeInt32LE(id, 4); b.writeInt32LE(0, 8); p.copy(b, 12);
+        return b;
+    };
+    const run = (cmd: string): string => {
+        state.log.push(cmd);
+        const [a, b, name] = cmd.split(' ');
+        const has = (n: string) => state.whitelist.findIndex(x => x.toLowerCase() === n.toLowerCase());
+        if (a === 'list') return 'There are 0 of a max of 20 players online: ';
+        if (a !== 'whitelist') return `Unknown or incomplete command, see below for error`;
+        if (b === 'list') return state.whitelist.length ? `There are ${state.whitelist.length} whitelisted player(s): ${state.whitelist.join(', ')}` : 'There are no whitelisted players';
+        if (b === 'add') {
+            if (state.known && !state.known(name)) return 'That player does not exist';
+            if (has(name) >= 0) return 'Player is already whitelisted';
+            state.whitelist.push(name);
+            return `Added ${name} to the whitelist`;
+        }
+        if (b === 'remove') {
+            const i = has(name);
+            if (i < 0) return 'Player is not whitelisted';
+            state.whitelist.splice(i, 1);
+            return `Removed ${name} from the whitelist`;
+        }
+        return 'Unknown or incomplete command';
+    };
+    return net.createServer(sock => {
+        let buf = Buffer.alloc(0);
+        let authed = false;
+        sock.on('data', chunk => {
+            buf = Buffer.concat([buf, chunk]);
+            while (buf.length >= 4 && buf.length >= 4 + buf.readInt32LE(0)) {
+                const len = buf.readInt32LE(0);
+                const id = buf.readInt32LE(4);
+                const type = buf.readInt32LE(8);
+                const body = buf.toString('utf8', 12, 4 + len - 2);
+                buf = buf.subarray(4 + len);
+                if (type === 3) { authed = body === password; sock.write(packet(authed ? id : -1, '')); continue; }
+                if (!authed) { sock.destroy(); return; }
+                sock.write(packet(id, run(body)));
+            }
+        });
+        sock.on('error', () => undefined);
+    }).listen(port, '127.0.0.1');
+}
+
+/** API de Mojang falsa: /users/profiles/minecraft/<nombre> y /session/minecraft/profile/<uuid>. */
+export function startFakeMojang(port: number, accounts: Record<string, string>): http.Server {
+    return http.createServer((req, res) => {
+        const url = req.url ?? '';
+        let m = /^\/users\/profiles\/minecraft\/([^/?]+)/.exec(url);
+        if (m) {
+            const name = Object.keys(accounts).find(n => n.toLowerCase() === decodeURIComponent(m![1]).toLowerCase());
+            if (!name) { res.statusCode = 204; return res.end(); }
+            res.setHeader('Content-Type', 'application/json');
+            return res.end(JSON.stringify({ id: accounts[name], name }));
+        }
+        m = /^\/session\/minecraft\/profile\/([0-9a-f]+)/.exec(url);
+        if (m) {
+            const name = Object.keys(accounts).find(n => accounts[n] === m![1]);
+            if (!name) { res.statusCode = 204; return res.end(); }
+            res.setHeader('Content-Type', 'application/json');
+            return res.end(JSON.stringify({ id: m[1], name }));
+        }
+        res.statusCode = 404;
+        res.end();
+    }).listen(port, '127.0.0.1');
+}

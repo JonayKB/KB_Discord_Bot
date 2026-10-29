@@ -29,6 +29,7 @@ Object.assign(process.env, {
     TOKEN: 'x', CLIENT_ID: '1', GUILD_ID: 'G1', ADMIN_ID: 'ADMIN', PANEL_PORT: String(PORT), PANEL_URL: `http://127.0.0.1:${PORT}`,
     PANEL_DEV_AUTH: '1', NODE_ENV: 'test', PANEL_HOST: '127.0.0.1',
     // Variables antiguas del estado del servidor: se importan una vez como servidor de juego.
+    MOJANG_API_URL: 'http://127.0.0.1:38211', MOJANG_SESSION_URL: 'http://127.0.0.1:38211',
     SERVER_TYPE: 'MINECRAFT', MINECRAFT_SERVER_IP: '127.0.0.1', MINECRAFT_SERVER_PORT: '38200', MINECRAFT_API_PORT: '38201',
 });
 
@@ -50,12 +51,12 @@ async function main() {
     const { createConfirmationsModule } = await import(src('modules/confirmations'));
     const { SchedulerService } = await import(src('modules/scheduler/service'));
     const { createSchedulerModule } = await import(src('modules/scheduler'));
-    const { ServersService, createServersModule } = await import(src('modules/servers'));
+    const { ServersService, WhitelistService, createServersModule } = await import(src('modules/servers'));
     const { ReactionRolesService, createReactionsModule } = await import(src('modules/reactions'));
     const { WelcomeService, createWelcomeModule } = await import(src('modules/welcome'));
     const { ModerationService, createModerationModule } = await import(src('modules/moderation'));
     const { TicketsService, createTicketsModule } = await import(src('modules/tickets'));
-    const { startFakeMinecraft, startFakeSpark } = await import('./fake-game-servers');
+    const { startFakeMinecraft, startFakeSpark, startFakeRcon, startFakeMojang } = await import('./fake-game-servers');
     const { startWebServer } = await import(src('web/server'));
     const { migrateLegacy, migrateReactions, migrateServers } = await import(src('core/migrateLegacy'));
     const { setServices } = await import(src('core/services'));
@@ -88,6 +89,7 @@ async function main() {
     const inbox = new InboxService(db, messages);
     const scheduler = new SchedulerService(db, messages, confirmations);
     const gameServers = new ServersService(client, db, confirmations);
+    const whitelist = new WhitelistService(client, db, gameServers, confirmations);
     const reactions = new ReactionRolesService(client, db);
     const welcome = new WelcomeService(client, db, messages);
     const moderation = new ModerationService(client, db, messages);
@@ -97,7 +99,7 @@ async function main() {
     manager.register(createInboxModule(inbox, messages, db));
     manager.register(createSchedulerModule(scheduler));
     manager.register(createConfirmationsModule(confirmations));
-    manager.register(createServersModule(gameServers));
+    manager.register(createServersModule(gameServers, whitelist));
     manager.register(createReactionsModule(reactions));
     manager.register(createWelcomeModule(welcome));
     manager.register(createModerationModule(moderation));
@@ -804,6 +806,115 @@ async function main() {
     assert.equal((await call('DELETE', `/api/tickets/${t3.id}`)).status, 200);
     assert.equal((await call('GET', '/api/tickets?q=Reportar')).json.tickets.length, 1, 'búsqueda');
     ok('borrar el canal a mano lo cierra; borrar del historial; búsqueda');
+
+    console.log('\nRCON y whitelist');
+    const ACCOUNTS: Record<string, string> = { Steve: 'aaa1', Alex: 'aaa2', Notch: 'aaa3', AdminManual: 'aaa4', NewName: 'aaa5', Jeb_: 'aaa6' };
+    const mcState = { whitelist: ['AdminManual'], log: [] as string[], known: (n: string) => Object.keys(ACCOUNTS).some(a => a.toLowerCase() === n.toLowerCase()) };
+    const fakeRcon = startFakeRcon(38210, 'secret', mcState);
+    const fakeMojang = startFakeMojang(38211, ACCOUNTS);
+    const wl = (n: string) => mcState.whitelist.some(x => x.toLowerCase() === n.toLowerCase());
+
+    assert.equal((await call('POST', `/api/servers/${mcId}/rcon/test`)).status, 400, 'sin configurar');
+    await call('PUT', `/api/servers/${mcId}/rcon`, { port: 38210, password: 'mala' });
+    assert.match((await call('POST', `/api/servers/${mcId}/rcon/test`)).json.error, /incorrecta/);
+    await call('PUT', `/api/servers/${mcId}/rcon`, { port: 38210, password: 'secret' });
+    assert.equal((await call('POST', `/api/servers/${mcId}/rcon/test`)).json.ok, true);
+    await call('PUT', `/api/servers/${mcId}/rcon`, { port: 38210 }); // sin contraseña: se conserva
+    const svJson = JSON.stringify((await call('GET', '/api/servers')).json);
+    assert.ok(svJson.includes('"hasPassword":true') && !svJson.includes('secret'), 'la contraseña nunca sale hacia el panel');
+    assert.match((await call('POST', `/api/servers/${mcId}/rcon/command`, { command: '/whitelist list' })).json.output, /AdminManual/);
+    ok('configurar RCON (contraseña oculta), probar conexión y consola');
+
+    const wc = (await call('POST', '/api/confirmations/campaigns', { name: 'Whitelist', title: 'Whitelist', description: 'Tu nombre de Minecraft' })).json;
+    assert.equal((await call('PUT', `/api/servers/${mcId}/whitelist/settings`, { enabled: true })).status, 400, 'hace falta la campaña');
+    await call('PUT', `/api/servers/${mcId}/whitelist/settings`, { enabled: true, campaignId: wc.id, onlineMode: true, allowRename: false, removeOnLeave: true });
+    const wlForm = async (userId: string, answer: string) => {
+        const notes: string[] = [];
+        try { await confirmations.respond(wc.id, userId, 'confirmed', { answer }, { notes }); return { notes }; }
+        catch (err) { return { error: (err as Error).message }; }
+    };
+    const entryOf = (userId: string) => confirmations.getEntry(wc.id, userId);
+
+    let f = await wlForm('U1', 'steve');
+    assert.deepEqual(f.notes, ['✅ Estás en la whitelist de **Minecraft** como `Steve`.']);
+    assert.ok(wl('Steve'));
+    assert.equal(entryOf('U1').answer, 'Steve', 'se guarda con las mayúsculas reales de la cuenta');
+    ok('al confirmar: se comprueba con Mojang, se añade por RCON y se le avisa');
+
+    f = await wlForm('U2', 'STEVE');
+    assert.match(f.error!, /ya lo tiene registrado otra persona/);
+    assert.equal(entryOf('U2'), undefined, 'no se guarda la confirmación');
+    assert.match((await wlForm('U2', 'Ghosty')).error!, /No existe ninguna cuenta/);
+    assert.match((await wlForm('U2', 'Steve; op U2')).error!, /no es un nombre de Minecraft válido/);
+    assert.ok(!mcState.log.some(c => c.includes(';')), 'nada raro llega a la consola');
+    ok('no se repiten nombres; nombres inexistentes o con comandos colados se rechazan');
+
+    assert.match((await wlForm('U1', 'Alex')).error!, /Ya tienes registrado "Steve"/);
+    assert.ok(wl('Steve') && !wl('Alex'));
+    await call('PUT', `/api/servers/${mcId}/whitelist/settings`, { enabled: true, campaignId: wc.id, allowRename: true, renameCooldownDays: 0 });
+    f = await wlForm('U1', 'alex');
+    assert.ok(wl('Alex') && !wl('Steve'), 'cambio de nombre: el viejo sale y entra el nuevo');
+    const rem = mcState.log.indexOf('whitelist remove Steve');
+    assert.ok(rem >= 0 && rem < mcState.log.indexOf('whitelist add Alex'), 'primero se quita el viejo');
+    await call('PUT', `/api/servers/${mcId}/whitelist/settings`, { enabled: true, campaignId: wc.id, allowRename: true, renameCooldownDays: 30 });
+    assert.match((await wlForm('U1', 'Notch')).error!, /cada 30 días/);
+    ok('un nombre por persona: cambiarlo está bloqueado o limitado por tiempo, y nunca tiene dos');
+
+    f = await wlForm('U3', 'AdminManual');
+    let wlEntries = (await call('GET', `/api/servers/${mcId}/whitelist`)).json.entries;
+    assert.equal(wlEntries.find((e: any) => e.mcName === 'AdminManual').preexisting, true);
+    const u3 = members.get('U3');
+    members.delete('U3');
+    client.emit('guildMemberRemove', u3);
+    await sleep(150);
+    assert.ok(wl('AdminManual'), 'un nombre que ya estaba antes nunca lo quita el bot');
+    assert.ok(!mcState.log.includes('whitelist remove AdminManual'));
+    ok('nombres que ya estaban en la whitelist se respetan');
+
+    await call('PUT', `/api/servers/${mcId}/rcon`, { port: 38299 });
+    f = await wlForm('U2', 'notch');
+    assert.match(f.notes![0], /en cuanto el servidor esté disponible/);
+    wlEntries = (await call('GET', `/api/servers/${mcId}/whitelist`)).json.entries;
+    const pend = wlEntries.find((e: any) => e.mcName === 'Notch');
+    assert.equal(pend.status, 'pending_add');
+    assert.match(pend.error, /rechazada/);
+    assert.match((await wlForm('U4', 'Notch')).error!, /otra persona/, 'mientras está pendiente, el nombre también está reservado');
+    await call('PUT', `/api/servers/${mcId}/rcon`, { port: 38210 });
+    await sleep(100);
+    await call('POST', `/api/servers/${mcId}/whitelist/process`);
+    assert.ok(wl('Notch'));
+    ok('servidor apagado: queda en cola (y reservado) y se aplica al volver');
+
+    await confirmations.respond(wc.id, 'U2', 'denied', { reason: 'no puedo' });
+    await sleep(100);
+    assert.ok(!wl('Notch'), 'al decir que no participa sale de la whitelist');
+    ok('pasar a "no participa" lo quita');
+
+    const pa = await call('POST', `/api/servers/${mcId}/whitelist`, { userId: 'U1', name: 'newname' });
+    assert.equal(pa.status, 201, JSON.stringify(pa.json));
+    assert.equal(pa.json.status, 'active');
+    assert.ok(wl('NewName') && !wl('Alex'));
+    assert.equal(entryOf('U1').answer, 'NewName', 'la respuesta de la campaña se actualiza');
+    assert.equal((await call('POST', `/api/servers/${mcId}/whitelist`, { userId: 'U2', name: 'NewName' })).status, 400, 'el staff tampoco puede duplicar');
+    ok('el staff puede cambiar el nombre desde el panel (sin duplicar)');
+
+    await confirmations.removeEntries(wc.id, ['U1'], { removeRole: false, resetNickname: false });
+    await sleep(100);
+    assert.ok(!wl('NewName'), 'borrarle de la campaña lo quita');
+    confirmations.upsertEntry(wc.id, { userId: 'U4', username: 'done_dc', answer: 'jeb_', status: 'confirmed' });
+    confirmations.upsertEntry(wc.id, { userId: 'U2', username: 'alex_dc', answer: 'JEB_', status: 'confirmed' });
+    const imp = (await call('POST', `/api/servers/${mcId}/whitelist/import`)).json;
+    assert.equal(imp.added, 1);
+    assert.deepEqual(imp.skipped.map((x: any) => x.user).sort(), ['done_dc', 'newbie_dc'], 'gana quien confirmó antes; se salta el repetido y a quien ya salió del Discord');
+    assert.ok(wl('Jeb_'));
+    ok('importar confirmados existentes (saltando duplicados)');
+
+    const serverView = (await call('GET', `/api/servers/${mcId}/whitelist/server`)).json;
+    assert.deepEqual(serverView.map((x: any) => [x.name, !!x.userId]), [['AdminManual', false], ['Jeb_', true]]);
+    assert.throws(() => db.prepare("INSERT INTO whitelist_entries (server_id, user_id, mc_name, status, created_at, updated_at) VALUES (?, 'X9', 'jeb_', 'active', 0, 0)").run(mcId), /UNIQUE/);
+    ok('vista de la whitelist real y garantía en la base de datos');
+    fakeRcon.close();
+    fakeMojang.close();
 
     console.log('\nMódulos en caliente');
     await call('POST', '/api/modules/messages/enabled', { enabled: false });

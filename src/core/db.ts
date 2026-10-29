@@ -273,6 +273,48 @@ const MIGRATIONS: string[] = [
     );
     CREATE INDEX idx_ticket_messages ON ticket_messages (ticket_id, id);
     `,
+    /* v6: RCON + whitelist de los servidores de juego */ `
+    ALTER TABLE game_servers ADD COLUMN rcon_port INTEGER;
+    ALTER TABLE game_servers ADD COLUMN rcon_password TEXT;
+
+    CREATE TABLE whitelist_settings (
+        server_id            INTEGER PRIMARY KEY REFERENCES game_servers (id) ON DELETE CASCADE,
+        enabled              INTEGER NOT NULL DEFAULT 0,
+        campaign_id          INTEGER REFERENCES campaigns (id) ON DELETE SET NULL,  -- de qué campaña salen los nombres
+        online_mode          INTEGER NOT NULL DEFAULT 1,   -- comprobar el nombre con Mojang y guardar su UUID
+        allow_rename         INTEGER NOT NULL DEFAULT 0,   -- el usuario puede cambiar su nombre él mismo
+        rename_cooldown_days INTEGER NOT NULL DEFAULT 30,
+        remove_on_leave      INTEGER NOT NULL DEFAULT 1    -- quitar de la whitelist al salir del Discord
+    );
+
+    /*
+     * Una fila por nombre que el bot ha gestionado (también los ya quitados, como historial).
+     * Estados: pending_add → active → pending_remove → removed  |  error (el servidor lo rechazó).
+     */
+    CREATE TABLE whitelist_entries (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        server_id      INTEGER NOT NULL REFERENCES game_servers (id) ON DELETE CASCADE,
+        user_id        TEXT NOT NULL,
+        username       TEXT,
+        mc_name        TEXT NOT NULL,
+        mc_uuid        TEXT,
+        status         TEXT NOT NULL CHECK (status IN ('pending_add','active','pending_remove','removed','error')),
+        preexisting    INTEGER NOT NULL DEFAULT 0,   -- ya estaba en la whitelist: el bot nunca lo quita
+        source         TEXT NOT NULL DEFAULT 'form', -- form | panel | import
+        added_by       TEXT,
+        error          TEXT,
+        removed_reason TEXT,
+        created_at     INTEGER NOT NULL,
+        updated_at     INTEGER NOT NULL
+    );
+    -- Garantías a nivel de base de datos (aunque el código fallara):
+    -- un solo nombre vigente por usuario y servidor…
+    CREATE UNIQUE INDEX ux_wl_user ON whitelist_entries (server_id, user_id) WHERE status IN ('pending_add','active');
+    -- …y un nombre/cuenta no puede pertenecer a dos usuarios (incluido mientras se está quitando).
+    CREATE UNIQUE INDEX ux_wl_name ON whitelist_entries (server_id, lower(mc_name)) WHERE status IN ('pending_add','active','pending_remove');
+    CREATE UNIQUE INDEX ux_wl_uuid ON whitelist_entries (server_id, mc_uuid) WHERE mc_uuid IS NOT NULL AND status IN ('pending_add','active','pending_remove');
+    CREATE INDEX idx_wl_user ON whitelist_entries (user_id);
+    `,
 ];
 
 export function openDb(file = path.join(DATA_DIR, 'bot.db')): DB {

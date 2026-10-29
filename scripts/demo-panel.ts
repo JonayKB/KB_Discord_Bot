@@ -52,7 +52,7 @@ async function main() {
     const { createConfirmationsModule } = await import(src('modules/confirmations'));
     const { SchedulerService } = await import(src('modules/scheduler/service'));
     const { createSchedulerModule } = await import(src('modules/scheduler'));
-    const { ServersService, createServersModule } = await import(src('modules/servers'));
+    const { ServersService, WhitelistService, createServersModule } = await import(src('modules/servers'));
     const { ReactionRolesService, createReactionsModule } = await import(src('modules/reactions'));
     const { WelcomeService, createWelcomeModule } = await import(src('modules/welcome'));
     const { ModerationService, createModerationModule } = await import(src('modules/moderation'));
@@ -91,7 +91,7 @@ async function main() {
     manager.register(createInboxModule(inbox, messages, db));
     manager.register(createSchedulerModule(scheduler));
     manager.register(createConfirmationsModule(confirmations));
-    manager.register(createServersModule(servers));
+    manager.register(createServersModule(servers, new WhitelistService(mock.client, db, servers, confirmations)));
     manager.register(createReactionsModule(reactions));
     manager.register(createWelcomeModule(new WelcomeService(mock.client, db, messages)));
     manager.register(createModerationModule(new ModerationService(mock.client, db, messages)));
