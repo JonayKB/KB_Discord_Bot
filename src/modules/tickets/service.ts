@@ -27,6 +27,7 @@ import { env } from '../../core/config';
 import { registerFile, toFileInfo, getFiles } from '../../core/files';
 import { HttpError, parseJson } from '../../core/http';
 import { Logger } from '../../utils/Logger';
+import { sameEmbed } from '../reactions/service';
 import type { MessagesService } from '../messages/service';
 
 const logger = new Logger('Tickets');
@@ -294,7 +295,9 @@ export class TicketsService {
         if (panel.channelId && panel.messageId) {
             const msg = await this.fetchMessage(panel.channelId, panel.messageId);
             if (!msg) warnings.push('El mensaje del panel ya no existe en Discord: publícalo de nuevo.');
-            else await msg.edit(this.panelMessage(panel)).catch(err => warnings.push(`No se pudo actualizar el mensaje: ${(err as Error).message}`));
+            else if (!this.panelUnchanged(msg, panel)) {
+                await msg.edit(this.panelMessage(panel)).catch(err => warnings.push(`No se pudo actualizar el mensaje: ${(err as Error).message}`));
+            }
         }
         publish('tickets:changed', {});
         return { panel, warnings };
@@ -321,6 +324,17 @@ export class TicketsService {
             rows[rows.length - 1].addComponents(b);
         });
         return { embeds: [embed], components: rows };
+    }
+
+    /** ¿El mensaje publicado ya muestra esto? (editar sin cambios deja la marca "(editado)" en Discord) */
+    private panelUnchanged(msg: Message, p: TicketPanel): boolean {
+        const next = this.panelMessage(p);
+        const buttons = (rows: Array<{ toJSON(): unknown }>) => JSON.stringify(rows.map(r => {
+            const row = r.toJSON() as { components?: Array<{ custom_id?: string; label?: string; style?: number; emoji?: { name?: string; id?: string } }> };
+            return (row.components ?? []).map(b => [b.custom_id, b.label, b.style, b.emoji?.id ?? b.emoji?.name ?? null]);
+        }));
+        return sameEmbed(msg.embeds?.[0]?.toJSON?.(), next.embeds[0].toJSON())
+            && buttons((msg.components ?? []) as Array<{ toJSON(): unknown }>) === buttons(next.components);
     }
 
     async publishPanel(id: number, channelId: string): Promise<TicketPanel> {

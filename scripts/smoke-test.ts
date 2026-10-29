@@ -461,6 +461,16 @@ async function main() {
     assert.equal(msgP.reactions.cache.filter((r: any) => r.me).size, 4, 'el bot pone una reacción por emoji distinto');
     ok('crear y publicar un mensaje con varias reacciones');
 
+    const edits0r = counterEdits.length;
+    assert.ok(!counterEdits.some((o: any) => o.embeds?.[0]?.data?.title === 'Elige tus roles'), 'recién creado, no se edita (sin "(editado)")');
+    assert.deepEqual((await call('POST', `/api/reactions/${P.id}/sync`)).json.warnings, []);
+    await call('PUT', `/api/reactions/${P.id}`, P);
+    assert.equal(counterEdits.length, edits0r, 'sincronizar o guardar sin cambios no edita');
+    await call('PUT', `/api/reactions/${P.id}`, { ...P, description: 'Texto nuevo' });
+    assert.equal(counterEdits.length, edits0r + 1, 'si cambia el texto, sí se edita');
+    await call('PUT', `/api/reactions/${P.id}`, P);
+    ok('el mensaje solo se edita cuando cambia (no aparece "(editado)" sin motivo)');
+
     await react(P.messageId, '🅰️', 'U1');
     await react(P.messageId, '🅰️', 'U1', false);
     assert.ok(has('U1', 'R_A'));
@@ -687,6 +697,12 @@ async function main() {
     assert.equal(panelMsg.embeds[0].data.title, 'Tickets');
     assert.deepEqual(panelMsg.components[0].components.map((b: any) => b.data.custom_id), [`tk:open:${tSup.id}`, `tk:open:${tRep.id}`]);
     ok('crear y publicar el panel con un botón por tipo de ticket');
+    const edits0t = counterEdits.length;
+    await call('PUT', `/api/tickets/panels/${tp.json.panel.id}`, tp.json.panel);
+    assert.equal(counterEdits.length, edits0t, 'guardar el panel sin cambios no lo edita');
+    await call('PUT', `/api/tickets/panels/${tp.json.panel.id}`, { ...tp.json.panel, title: 'Soporte MCKB' });
+    assert.equal(counterEdits.length, edits0t + 1);
+    ok('el panel de tickets solo se edita cuando cambia');
 
     let r = interact(`tk:open:${tSup.id}`, 'U1');
     await sleep(80);

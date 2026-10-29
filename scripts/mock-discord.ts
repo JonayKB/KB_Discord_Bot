@@ -102,7 +102,14 @@ export function createMockDiscord(guildId = 'G1') {
         const reactions = new Collection<string, any>();
         const msg: any = {
             id, channelId, guildId, guild, partial: false,
-            edit: async (o: any) => { counterEdits.push(o); return msg; },
+            embeds: [] as any[], components: [] as any[],
+            /** Guarda lo enviado con la forma que devuelve discord.js (objetos con toJSON). */
+            setContent: (o: any) => {
+                const wrap = (x: any) => ({ toJSON: () => (x?.toJSON ? x.toJSON() : x) });
+                if (o.embeds) msg.embeds = o.embeds.map(wrap);
+                if (o.components) msg.components = o.components.map(wrap);
+            },
+            edit: async (o: any) => { counterEdits.push(o); msg.setContent(o); return msg; },
             delete: async () => { messages.delete(id); deletedMessages.push(id); },
             fetch: async () => msg,
             reactions: { cache: reactions },
@@ -146,7 +153,7 @@ export function createMockDiscord(guildId = 'G1') {
         if (!c) return null;
         return {
             ...c,
-            send: async (o: any) => { channelsSent.push({ ...o, channelId: id }); return mkMessage(`cm${++sentCount}`, id); },
+            send: async (o: any) => { channelsSent.push({ ...o, channelId: id }); const m = mkMessage(`cm${++sentCount}`, id); m.setContent(o); return m; },
             messages: {
                 fetch: async (mid: string) => {
                     if (mid.startsWith('9')) throw Object.assign(new Error('Unknown Message'), { code: 10008 });

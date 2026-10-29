@@ -1,4 +1,4 @@
-import { EmbedBuilder, type Client, type Guild, type GuildMember, type Message, type MessageReaction, type PartialMessage, type PartialMessageReaction, type PartialUser, type User } from 'discord.js';
+import { EmbedBuilder, type APIEmbed, type Client, type Guild, type GuildMember, type Message, type MessageReaction, type PartialMessage, type PartialMessageReaction, type PartialUser, type User } from 'discord.js';
 import type { DB } from '../../core/db';
 import { publish } from '../../core/bus';
 import { env } from '../../core/config';
@@ -123,6 +123,13 @@ export function normalizeEmoji(guild: Guild | undefined, raw: string): string {
     }
     if (/\s/.test(v) || v.length > 32) throw new HttpError(400, `"${v}" no parece un emoji.`);
     return v;
+}
+
+/** Compara lo que se ve de dos embeds (Discord devuelve campos extra como type o el color en número). */
+export function sameEmbed(a: APIEmbed | undefined, b: APIEmbed): boolean {
+    if (!a) return false;
+    const norm = (e: APIEmbed) => JSON.stringify([e.title ?? '', e.description ?? '', e.color ?? null, e.footer?.text ?? '']);
+    return norm(a) === norm(b);
 }
 
 const reactionKey = (messageId: string, emoji: { id: string | null; name: string | null }, userId: string) =>
@@ -357,8 +364,10 @@ export class ReactionRolesService {
         if (!message) return ['El mensaje ya no existe en Discord: publícalo de nuevo.'];
 
         const warnings: string[] = [];
-        if (p.manageEmbed) {
-            await message.edit({ embeds: [this.buildEmbed(p)] }).catch(err => warnings.push(`No se pudo editar el mensaje: ${(err as Error).message}`));
+        const embed = this.buildEmbed(p);
+        // Solo se edita si el texto cambió de verdad: cada edición deja la marca "(editado)" en Discord.
+        if (p.manageEmbed && !sameEmbed(message.embeds?.[0]?.toJSON?.() ?? message.embeds?.[0], embed.toJSON())) {
+            await message.edit({ embeds: [embed] }).catch(err => warnings.push(`No se pudo editar el mensaje: ${(err as Error).message}`));
         }
 
         const me = this.client.user?.id;
