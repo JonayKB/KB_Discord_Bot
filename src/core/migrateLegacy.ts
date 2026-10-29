@@ -77,3 +77,38 @@ export function migrateLegacy(db: DB): void {
 
     logger.info(`✅ Migración inicial: campaña creada con ${Object.keys(names).length} confirmados y ${Object.keys(denied).length} rechazos importados.`);
 }
+
+/**
+ * Se ejecuta una sola vez: crea el servidor de juego a partir de las variables antiguas del .env
+ * (SERVER_TYPE, MINECRAFT_*, HYTALE_*) y enlaza el mensaje de estado que ya existía (config.json).
+ * Después todo se gestiona desde la sección "Servidores" del panel.
+ */
+export function migrateServers(db: DB): void {
+    if (getSetting(db, 'migrated.servers_v1', '0') === '1') return;
+    const already = (db.prepare('SELECT COUNT(*) AS n FROM game_servers').get() as { n: number }).n > 0;
+
+    const type = (process.env.SERVER_TYPE ?? '').trim().toUpperCase();
+    const num = (v: string | undefined) => (v && /^\d+$/.test(v.trim()) ? Number(v.trim()) : null);
+    let row: { name: string; type: 'minecraft' | 'hytale'; host: string; port: number | null; apiPort: number | null } | null = null;
+
+    if (type === 'MINECRAFT' && process.env.MINECRAFT_SERVER_IP) {
+        row = {
+            name: 'Minecraft', type: 'minecraft', host: process.env.MINECRAFT_SERVER_IP.trim(),
+            port: num(process.env.MINECRAFT_SERVER_PORT), apiPort: num(process.env.MINECRAFT_API_PORT),
+        };
+    } else if (type === 'HYTALE' && process.env.HYTALE_SERVER_IP && num(process.env.HYTALE_API_PORT)) {
+        row = { name: 'Hytale', type: 'hytale', host: process.env.HYTALE_SERVER_IP.trim(), port: null, apiPort: num(process.env.HYTALE_API_PORT) };
+    }
+
+    db.transaction(() => {
+        if (row && !already) {
+            const cfg = readJson<Record<string, string>>('config.json') ?? {};
+            db.prepare(`
+                INSERT INTO game_servers (name, type, host, port, api_port, enabled, link_players, channel_id, message_id, created_at)
+                VALUES (?, ?, ?, ?, ?, 1, 1, ?, ?, ?)
+            `).run(row.name, row.type, row.host, row.port, row.apiPort, cfg.canalInfoID || null, cfg.mensajeInfoID || null, Date.now());
+            logger.info(`✅ Servidor "${row.name}" importado del .env (${row.host}). Ya puedes gestionarlo desde el panel.`);
+        }
+        setSetting(db, 'migrated.servers_v1', '1');
+    })();
+}

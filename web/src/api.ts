@@ -140,6 +140,8 @@ export interface Campaign {
     confirmedRoleId: string | null;
     deniedRoleId: string | null;
     excludeRoleIds: string[];
+    includeRoleIds: string[];
+    inputLong: boolean;
     skipResponded: boolean;
     sendOnJoin: boolean;
     setNickname: boolean;
@@ -177,3 +179,39 @@ export interface Status {
 }
 
 export interface LogEntry { ts: string; level: 'debug' | 'info' | 'warn' | 'error'; scope?: string; message: string }
+
+export type ServerKind = 'minecraft' | 'hytale';
+
+export interface ServerStatus {
+    serverId: number;
+    online: boolean;
+    checkedAt: number;
+    latencyMs: number | null;
+    error: string | null;
+    version: string | null;
+    motd: string | null;
+    playersOnline: number;
+    maxPlayers: number;
+    players: Array<{ name: string; id?: string; discordId?: string | null; discordName?: string | null }>;
+    playerListComplete: boolean;
+    tps: { s10: number; m1: number; m5: number; m15: number } | null;
+    msptMs: number | null;
+    cpu: number | null;
+    warnings: string[];
+    messageError?: string | null;
+}
+
+export interface GameServer {
+    id: number;
+    name: string;
+    type: ServerKind;
+    host: string;
+    port: number | null;
+    apiPort: number | null;
+    enabled: boolean;
+    linkPlayers: boolean;
+    channelId: string | null;
+    messageId: string | null;
+    createdAt: number;
+    status: ServerStatus | null;
+}

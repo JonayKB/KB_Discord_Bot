@@ -41,6 +41,8 @@ function parseCampaign(body: any): CampaignInput {
         confirmedRoleId: optId(body.confirmedRoleId, 'confirmedRoleId'),
         deniedRoleId: optId(body.deniedRoleId, 'deniedRoleId'),
         excludeRoleIds: strArray(body.excludeRoleIds, 'excludeRoleIds', 50),
+        includeRoleIds: strArray(body.includeRoleIds, 'includeRoleIds', 50),
+        inputLong: bool(body.inputLong),
         skipResponded: body.skipResponded === undefined ? true : bool(body.skipResponded),
         sendOnJoin: bool(body.sendOnJoin),
         setNickname: bool(body.setNickname),
@@ -112,7 +114,7 @@ export function createConfirmationsModule(service: ConfirmationService): BotModu
         const status = req.body?.status === 'denied' ? 'denied' : 'confirmed';
         const warnings = await service.respond(
             id, userId, status,
-            { answer: str(req.body?.answer, 'answer', { max: 100 }), reason: str(req.body?.reason, 'reason', { max: 1000 }) },
+            { answer: str(req.body?.answer, 'answer', { max: 1000 }), reason: str(req.body?.reason, 'reason', { max: 1000 }) },
             { applyRoles: req.body?.applyRoles === undefined ? true : bool(req.body.applyRoles) }
         );
         res.status(201).json({ ok: true, warnings });
@@ -167,6 +169,8 @@ export function createConfirmationsModule(service: ConfirmationService): BotModu
             ctx.listen('guildMemberAdd', async member => {
                 for (const c of service.listCampaigns()) {
                     if (!c.enabled || !c.sendOnJoin) continue;
+                    // Con "solo a quien tenga estos roles", un recién llegado normalmente aún no los tiene.
+                    if (!service.hasRequiredRole(c, member)) continue;
                     await service.sendForm(c.id, [member.id]).catch(err => ctx.logger.warn(`No se pudo enviar la confirmación "${c.name}" al nuevo miembro: ${err.message}`));
                 }
                 refresh();
@@ -191,9 +195,9 @@ export function createConfirmationsModule(service: ConfirmationService): BotModu
                     const input = new TextInputBuilder()
                         .setCustomId(isDeny ? 'reason' : 'answer')
                         .setLabel(isDeny ? 'Indica el motivo de tu no participación' : campaign.inputLabel.slice(0, 45))
-                        .setStyle(isDeny ? TextInputStyle.Paragraph : TextInputStyle.Short)
+                        .setStyle(isDeny || campaign.inputLong ? TextInputStyle.Paragraph : TextInputStyle.Short)
                         .setRequired(true)
-                        .setMaxLength(isDeny ? 1000 : 100);
+                        .setMaxLength(isDeny || campaign.inputLong ? 1000 : 100);
                     const modal = new ModalBuilder()
                         .setCustomId(`cf:${isDeny ? 'dmodal' : 'modal'}:${campaign.id}`)
                         .setTitle(isDeny ? 'Confirmación de No Participación' : 'Formulario de confirmación')

@@ -8,6 +8,7 @@ const HELP: Record<string, string> = {
     inbox: 'Al desactivarlo, el bot deja de guardar los MD que recibe y de reenviarlos.',
     scheduler: 'Al desactivarlo, las tareas programadas quedan en pausa (no se pierden).',
     confirmations: 'Al desactivarlo, los botones de los formularios dejan de responder y se pausa el contador.',
+    servers: 'Al desactivarlo, se deja de consultar los servidores y el mensaje de estado en Discord se queda congelado.',
 };
 
 export default function Modules() {

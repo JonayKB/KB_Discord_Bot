@@ -14,7 +14,7 @@ const blank = (): Omit<Campaign, 'id' | 'legacy' | 'counterChannelId' | 'counter
     name: '', enabled: true, title: '✨ Confirmación de Participación',
     description: 'Hola {user}, para participar completa el formulario con el botón de abajo.',
     color: '#3B82F6', confirmLabel: 'Abrir formulario', denyLabel: 'No deseo participar', inputLabel: 'Escribe tu nombre de usuario',
-    allowDeny: true, confirmedRoleId: null, deniedRoleId: null, excludeRoleIds: [], skipResponded: true, sendOnJoin: false,
+    allowDeny: true, confirmedRoleId: null, deniedRoleId: null, excludeRoleIds: [], includeRoleIds: [], inputLong: false, skipResponded: true, sendOnJoin: false,
     setNickname: false, nicknameTemplate: '{global} ({answer})', counterTitle: '📊 Cantidad de Personas QUE HAN CONFIRMADO:',
 });
 
@@ -136,6 +136,9 @@ export default function Confirmations() {
                                     <button className="btn" disabled={!campaign.enabled} onClick={() => setModal('send')}>Enviar a usuarios concretos…</button>
                                     <button className="btn" onClick={() => setModal('add')}><Icon name="plus" size={14} /> Añadir confirmado a mano</button>
                                 </div>
+                                {campaign.includeRoleIds.length > 0 && (
+                                    <div className="alert info">Solo se envía a quien tenga {campaign.includeRoleIds.length === 1 ? 'el rol' : 'alguno de los roles'} <b>{campaign.includeRoleIds.map(id => roleName(id) ?? id).join(', ')}</b>.</div>
+                                )}
                                 {!campaign.confirmedRoleId && <div className="alert">Esta campaña no tiene rol de confirmado: se guardarán las respuestas pero no se dará ningún rol ni funcionará el contador.</div>}
 
                                 <div className="sep" />
@@ -230,7 +233,6 @@ function CampaignEditor({ initial, guild, onClose, onSaved }: {
         finally { setSaving(false); }
     };
 
-    const toggleExclude = (id: string) => set({ excludeRoleIds: d.excludeRoleIds.includes(id) ? d.excludeRoleIds.filter(x => x !== id) : [...d.excludeRoleIds, id] });
 
     return (
         <Modal title={initial ? `Editar "${initial.name}"` : 'Nueva campaña'} wide onClose={onClose} footer={<>
@@ -252,6 +254,8 @@ function CampaignEditor({ initial, guild, onClose, onSaved }: {
                     <label className="field">Pregunta del formulario<input type="text" maxLength={45} value={d.inputLabel} onChange={e => set({ inputLabel: e.target.value })} /></label>
                 </div>
                 <Check checked={d.allowDeny} onChange={allowDeny => set({ allowDeny })} label='Mostrar botón "No deseo participar"' />
+                <Check checked={d.inputLong} onChange={inputLong => set({ inputLong })} label="Respuesta larga (párrafo de hasta 1000 caracteres)"
+                    hint="Útil para encuestas o sugerencias, p. ej. qué modpack prefieren. Si no, es una sola línea de hasta 100." />
                 <div className="dc" style={{ marginTop: 4 }}>
                     <div className="dc-embed" style={{ marginLeft: 0, borderLeftColor: d.color }}>
                         <div className="t">{d.title}</div><div className="d">{d.description}</div>
@@ -270,15 +274,11 @@ function CampaignEditor({ initial, guild, onClose, onSaved }: {
                     <label className="field">Rol que se da al confirmar<RoleSelect value={d.confirmedRoleId} onChange={confirmedRoleId => set({ confirmedRoleId })} roles={guild.roles} /></label>
                     <label className="field">Rol que se da al rechazar<RoleSelect value={d.deniedRoleId} onChange={deniedRoleId => set({ deniedRoleId })} roles={guild.roles} /></label>
                 </div>
-                <div className="field">
-                    <span>No enviar a quien tenga alguno de estos roles</span>
-                    <div className="card" style={{ background: 'var(--panel-2)', padding: 10, maxHeight: 150, overflowY: 'auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(180px,1fr))', gap: 6 }}>
-                        {guild.roles.filter(r => !r.managed).map(r => (
-                            <label key={r.id} className="check" style={{ fontWeight: 450 }}><input type="checkbox" checked={d.excludeRoleIds.includes(r.id)} onChange={() => toggleExclude(r.id)} /> {r.name}</label>
-                        ))}
-                        {guild.roles.length === 0 && <span className="hint">Cargando roles…</span>}
-                    </div>
-                </div>
+                <RoleChecklist label="Enviar solo a quien tenga alguno de estos roles (opcional)" roles={guild.roles} value={d.includeRoleIds}
+                    onChange={includeRoleIds => set({ includeRoleIds })}
+                    hint="Déjalo vacío para enviar a todo el servidor. Por ejemplo, marca el rol de confirmado de otra campaña para preguntar solo a quienes ya confirmaron." />
+                <RoleChecklist label="No enviar a quien tenga alguno de estos roles" roles={guild.roles} value={d.excludeRoleIds}
+                    onChange={excludeRoleIds => set({ excludeRoleIds })} />
             </div>
 
             <div className="sep" />
@@ -296,6 +296,24 @@ function CampaignEditor({ initial, guild, onClose, onSaved }: {
                 <label className="field">Título del mensaje contador<input type="text" maxLength={256} value={d.counterTitle} onChange={e => set({ counterTitle: e.target.value })} /></label>
             </div>
         </Modal>
+    );
+}
+
+function RoleChecklist({ label, hint, roles, value, onChange }: {
+    label: string; hint?: string; roles: ReturnType<typeof useGuildData>['roles']; value: string[]; onChange: (v: string[]) => void;
+}) {
+    const toggle = (id: string) => onChange(value.includes(id) ? value.filter(x => x !== id) : [...value, id]);
+    return (
+        <div className="field">
+            <span>{label}</span>
+            <div className="card" style={{ background: 'var(--panel-2)', padding: 10, maxHeight: 150, overflowY: 'auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(180px,1fr))', gap: 6 }}>
+                {roles.filter(r => !r.managed).map(r => (
+                    <label key={r.id} className="check" style={{ fontWeight: 450 }}><input type="checkbox" checked={value.includes(r.id)} onChange={() => toggle(r.id)} /> {r.name} <span className="muted small">({r.members})</span></label>
+                ))}
+                {roles.length === 0 && <span className="hint">Cargando roles…</span>}
+            </div>
+            {hint && <span className="hint">{hint}</span>}
+        </div>
     );
 }
 
@@ -322,7 +340,7 @@ function AddEntryModal({ campaign, onClose, onDone }: { campaign: Campaign; onCl
         <Modal title="Añadir o corregir una respuesta" onClose={onClose} footer={<><button className="btn" onClick={onClose}>Cancelar</button><button className="btn primary" disabled={saving} onClick={save}>Guardar</button></>}>
             {user ? <div><span className="chip"><Avatar src={user.avatar} name={user.displayName} size="sm" />{user.displayName}<button onClick={() => setUser(null)} aria-label="Quitar">×</button></span></div> : <UserPicker onPick={setUser} />}
             <div className="seg"><button className={status === 'confirmed' ? 'on' : ''} onClick={() => setStatus('confirmed')}>Confirmado</button><button className={status === 'denied' ? 'on' : ''} onClick={() => setStatus('denied')}>No participa</button></div>
-            <label className="field">{status === 'confirmed' ? campaign.inputLabel : 'Motivo'}<input type="text" value={text} maxLength={status === 'confirmed' ? 100 : 1000} onChange={e => setText(e.target.value)} /></label>
+            <label className="field">{status === 'confirmed' ? campaign.inputLabel : 'Motivo'}<input type="text" value={text} maxLength={status === 'confirmed' && !campaign.inputLong ? 100 : 1000} onChange={e => setText(e.target.value)} /></label>
             <Check checked={applyRoles} onChange={setApplyRoles} label="Aplicar roles (y apodo) en Discord" hint="Si ya la tiene en Discord y solo quieres registrarla, desmárcalo." />
             <p className="hint" style={{ margin: 0 }}>Si el usuario ya tenía una respuesta, se sustituye.</p>
         </Modal>

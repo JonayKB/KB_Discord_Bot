@@ -1,5 +1,6 @@
 import type { ConfirmationService } from '../modules/confirmations/service';
 import type { MessagesService } from '../modules/messages/service';
+import type { ServersService } from '../modules/servers/service';
 
 /**
  * Acceso global a los servicios para el código "legacy" (eventos y utilidades que
@@ -8,6 +9,7 @@ import type { MessagesService } from '../modules/messages/service';
 export interface Services {
     messages: MessagesService;
     confirmations: ConfirmationService;
+    servers: ServersService;
 }
 
 let current: Services | null = null;

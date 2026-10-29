@@ -51,6 +51,8 @@ async function main() {
     const { createConfirmationsModule } = await import(src('modules/confirmations'));
     const { SchedulerService } = await import(src('modules/scheduler/service'));
     const { createSchedulerModule } = await import(src('modules/scheduler'));
+    const { ServersService, createServersModule } = await import(src('modules/servers'));
+    const { startFakeMinecraft, startFakeSpark } = await import('./fake-game-servers');
     const { startWebServer } = await import(src('web/server'));
     const { migrateLegacy } = await import(src('core/migrateLegacy'));
     const { setServices } = await import(src('core/services'));
@@ -77,12 +79,21 @@ async function main() {
     const confirmations = new ConfirmationService(mock.client, db, messages);
     const inbox = new InboxService(db, messages);
     const scheduler = new SchedulerService(db, messages, confirmations);
-    setServices({ messages, confirmations });
+    const servers = new ServersService(mock.client, db, confirmations);
+    setServices({ messages, confirmations, servers });
     manager.register(createMessagesModule(messages, db));
     manager.register(createInboxModule(inbox, messages, db));
     manager.register(createSchedulerModule(scheduler));
     manager.register(createConfirmationsModule(confirmations));
+    manager.register(createServersModule(servers));
     migrateLegacy(db);
+
+    // Servidores de juego de ejemplo: un Minecraft falso (con métricas Spark) y uno apagado.
+    startFakeMinecraft(38250, { online: 5, max: 20, players: ['Steve_MC', 'AlexG', 'LunaCraft', 'ZoeMC', 'Herobrine'], version: 'Paper 1.21.1', motd: 'MCKB Survival · Temporada 3' });
+    startFakeSpark(38251, 18.6);
+    const addServer = db.prepare("INSERT INTO game_servers (name, type, host, port, api_port, enabled, link_players, channel_id, message_id, created_at) VALUES (?, ?, '127.0.0.1', ?, ?, 1, 1, ?, ?, ?)");
+    addServer.run('MCKB Survival', 'minecraft', 38250, 38251, 'C_GEN', 'M_STATUS', Date.now());
+    addServer.run('Hytale MCKB', 'hytale', null, 38252, null, null, Date.now());
     await manager.startEnabled();
 
     // ── Datos de ejemplo ──

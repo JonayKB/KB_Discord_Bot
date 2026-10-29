@@ -11,6 +11,7 @@ Bot de Discord de MCKBServers, ahora **modular** y con un **panel web** para ges
 | No se podía responder fuera de Discord | Módulo **Bandeja**: conversaciones por MD, responder desde el panel (texto + imágenes) |
 | No se enviaban imágenes | Texto, embeds e **imágenes/archivos** a un usuario, varios, un rol, todo el servidor o un canal; plantillas reutilizables y variables (`{user}`, `{server}`…) |
 | Una sola confirmación, y borrar a alguien era editar JSON | Módulo **Confirmaciones**: **varias campañas a la vez** (cada una con su formulario, roles, contador y calendario), borrar/añadir/corregir confirmados desde el panel |
+| Estado de un solo servidor, configurado en el `.env` | Módulo **Servidores de juego**: varios servidores de Minecraft y Hytale, estadísticas en directo en el panel (jugadores, latencia, TPS, MSPT, CPU, versión) y su mensaje de estado en Discord, todo editable sin reiniciar |
 | Todo mezclado | Cada función es un módulo independiente que se activa/desactiva al instante |
 
 ## Puesta en marcha
@@ -58,6 +59,7 @@ Al arrancar por primera vez, el bot convierte tu configuración antigua (sin bor
 - `names.json` y `denied_reasons.json` → confirmados y rechazos de esa campaña (se enlazan a su ID real de Discord en cuanto la persona está en el servidor; si ya no está aparece como "No encontrado").
 - El cron fijo de las 14:00 → una tarea editable **"Envío diario de la confirmación"**.
 - Los botones de los MD que ya enviaste **siguen funcionando**.
+- `SERVER_TYPE` + `MINECRAFT_*` / `HYTALE_*` del `.env` y el mensaje de estado de `config.json` → un servidor en **Servidores de juego** (después esas variables ya no se usan).
 
 ## Estructura
 
@@ -74,10 +76,11 @@ src/
     inbox/                 MD recibidos y respuestas
     scheduler/             tareas programadas
     confirmations/         campañas, formularios, confirmados, contador
+    servers/               servidores de juego: consulta (MC/Hytale), estado en el panel y mensaje en Discord
   web/                     servidor del panel (Express + WebSocket) y login con Discord
-  commands/ events/ utils/ código anterior: estado del servidor, roles por reacción, bienvenida
+  commands/ events/ utils/ código anterior: roles por reacción, bienvenida, /create_info_message
 web/                       panel (React + Vite)
-scripts/                   smoke-test.ts, demo-panel.ts
+scripts/                   smoke-test.ts, demo-panel.ts, fake-game-servers.ts
 ```
 
 ### Cómo añadir un módulo nuevo
@@ -115,10 +118,13 @@ npm run smoke        # 28 pruebas automáticas de los flujos principales con Dis
 - **Módulo Mensajes desactivado = pausa global**: el bot no envía nada (ni programado ni confirmaciones) hasta reactivarlo.
 - **Envíos masivos**: 1 MD por segundo aprox. para respetar los rate limits; el progreso se ve en directo.
 - La bandeja solo lista conversaciones "reales" (alguien te escribió, o tú le escribiste/respondiste a un usuario); los MD automáticos y masivos quedan en el Historial.
-- El comando `/create_confirmation_message` ya no existe: el mensaje contador se crea desde **Confirmaciones**. `/create_info_message` y `/setreaction` siguen igual.
+- El comando `/create_confirmation_message` ya no existe: el mensaje contador se crea desde **Confirmaciones**. `/setreaction` sigue igual.
+- `/create_info_message canal [servidor]` publica el mensaje de estado de un servidor de juego (por defecto el primero). Ahora solo lo ven quienes pueden **Gestionar el servidor**. Lo mismo se hace desde **Servidores**.
+- **Campañas solo para un rol**: la opción "Enviar solo a quien tenga alguno de estos roles" limita los envíos (y el "Enviar al unirse") a quien tenga ese rol. Sirve para encuestas a los ya confirmados, p. ej. elegir modpack. Con "Respuesta larga" el formulario es un párrafo de hasta 1000 caracteres.
+- **Servidores de juego**: en Minecraft, el estado y los jugadores salen del ping normal; con `enable-query=true` se ve la lista completa, y con el puerto de la API de métricas (Spark `/metrics`), TPS, MSPT y CPU. En Hytale se usa la API Nitrado Query. Los jugadores se asocian a Discord por lo que respondieron en las campañas.
 - El formulario de confirmación al unirse ahora es la opción **"Enviar al unirse"** de cada campaña (la bienvenida sigue siendo automática y ahora queda en el historial).
 - El contador usa la descripción del embed (límite 4096) en vez de un campo (límite 1024), así no se rompe con muchos confirmados.
-- Se eliminó `NODE_TLS_REJECT_UNAUTHORIZED=0` global (hytaleServerData.ts): desactivaba la verificación TLS de **todo** el proceso. Ahora solo se relaja en la petición al servidor de Hytale (certificado autofirmado).
+- Se eliminó `NODE_TLS_REJECT_UNAUTHORIZED=0` global: desactivaba la verificación TLS de **todo** el proceso. Ahora solo se relaja en la petición al servidor de Hytale (certificado autofirmado).
 - `node-cron` se sustituyó por `croner` (zonas horarias, vista previa de próximas ejecuciones y pausa/reanudación).
 - Errores no capturados ya no tumban el bot, y hay apagado limpio con `pm2 reload`.
 - Las imágenes recibidas se descargan a `data/uploads/` (los enlaces del CDN de Discord caducan).

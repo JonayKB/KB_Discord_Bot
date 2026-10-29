@@ -9,6 +9,7 @@ import Inbox from './pages/Inbox';
 import History from './pages/History';
 import Scheduler from './pages/Scheduler';
 import Confirmations from './pages/Confirmations';
+import Servers from './pages/Servers';
 import Modules from './pages/Modules';
 import Logs from './pages/Logs';
 
@@ -21,6 +22,7 @@ const NAV = [
     ['history', 'Historial', 'list'],
     ['scheduler', 'Programación', 'clock'],
     ['confirmations', 'Confirmaciones', 'check'],
+    ['servers', 'Servidores', 'server'],
     ['modules', 'Módulos', 'grid'],
     ['logs', 'Registros', 'terminal'],
 ] as const;
@@ -105,6 +107,7 @@ export default function App() {
                     {page === 'history' && <History />}
                     {page === 'scheduler' && <Scheduler />}
                     {page === 'confirmations' && <Confirmations />}
+                    {page === 'servers' && <Servers />}
                     {page === 'modules' && <Modules />}
                     {page === 'logs' && <Logs />}
                     {!NAV.some(n => n[0] === page) && <Dashboard />}

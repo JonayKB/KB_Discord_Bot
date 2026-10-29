@@ -30,6 +30,8 @@ export interface CampaignRow {
     confirmed_role_id: string | null;
     denied_role_id: string | null;
     exclude_role_ids: string;
+    include_role_ids: string;
+    input_long: number;
     skip_responded: number;
     send_on_join: number;
     set_nickname: number;
@@ -55,6 +57,10 @@ export interface Campaign {
     confirmedRoleId: string | null;
     deniedRoleId: string | null;
     excludeRoleIds: string[];
+    /** Si no está vacío: solo se envía a quien tenga AL MENOS uno de estos roles. */
+    includeRoleIds: string[];
+    /** Respuesta de texto largo (párrafo, hasta 1000 caracteres) en vez de una línea. */
+    inputLong: boolean;
     skipResponded: boolean;
     sendOnJoin: boolean;
     setNickname: boolean;
@@ -111,6 +117,8 @@ export const toCampaign = (r: CampaignRow): Campaign => ({
     confirmedRoleId: r.confirmed_role_id,
     deniedRoleId: r.denied_role_id,
     excludeRoleIds: parseJson<string[]>(r.exclude_role_ids, []),
+    includeRoleIds: parseJson<string[]>(r.include_role_ids, []),
+    inputLong: !!r.input_long,
     skipResponded: !!r.skip_responded,
     sendOnJoin: !!r.send_on_join,
     setNickname: !!r.set_nickname,
@@ -162,10 +170,10 @@ export class ConfirmationService {
     createCampaign(input: CampaignInput): Campaign {
         const res = this.db.prepare(`
             INSERT INTO campaigns (name, enabled, title, description, color, confirm_label, deny_label, input_label, allow_deny,
-                confirmed_role_id, denied_role_id, exclude_role_ids, skip_responded, send_on_join, set_nickname,
+                confirmed_role_id, denied_role_id, exclude_role_ids, include_role_ids, input_long, skip_responded, send_on_join, set_nickname,
                 nickname_template, counter_title, created_at)
             VALUES (@name, @enabled, @title, @description, @color, @confirmLabel, @denyLabel, @inputLabel, @allowDeny,
-                @confirmedRoleId, @deniedRoleId, @excludeRoleIds, @skipResponded, @sendOnJoin, @setNickname,
+                @confirmedRoleId, @deniedRoleId, @excludeRoleIds, @includeRoleIds, @inputLong, @skipResponded, @sendOnJoin, @setNickname,
                 @nicknameTemplate, @counterTitle, @createdAt)
         `).run(this.toParams(input, { createdAt: Date.now() }));
         const c = this.requireCampaign(Number(res.lastInsertRowid));
@@ -179,6 +187,7 @@ export class ConfirmationService {
             UPDATE campaigns SET name=@name, enabled=@enabled, title=@title, description=@description, color=@color,
                 confirm_label=@confirmLabel, deny_label=@denyLabel, input_label=@inputLabel, allow_deny=@allowDeny,
                 confirmed_role_id=@confirmedRoleId, denied_role_id=@deniedRoleId, exclude_role_ids=@excludeRoleIds,
+                include_role_ids=@includeRoleIds, input_long=@inputLong,
                 skip_responded=@skipResponded, send_on_join=@sendOnJoin, set_nickname=@setNickname,
                 nickname_template=@nicknameTemplate, counter_title=@counterTitle
             WHERE id=@id
@@ -211,6 +220,8 @@ export class ConfirmationService {
             confirmedRoleId: i.confirmedRoleId || null,
             deniedRoleId: i.deniedRoleId || null,
             excludeRoleIds: JSON.stringify(i.excludeRoleIds),
+            includeRoleIds: JSON.stringify(i.includeRoleIds),
+            inputLong: i.inputLong ? 1 : 0,
             skipResponded: i.skipResponded ? 1 : 0,
             sendOnJoin: i.sendOnJoin ? 1 : 0,
             setNickname: i.setNickname ? 1 : 0,
@@ -409,6 +420,11 @@ export class ConfirmationService {
 
     // ────────────────────────── Envío del formulario ──────────────────────────
 
+    /** ¿Cumple el miembro el filtro "solo a quien tenga alguno de estos roles"? (sin filtro → sí) */
+    hasRequiredRole(campaign: Campaign, member: GuildMember): boolean {
+        return !campaign.includeRoleIds.length || campaign.includeRoleIds.some(r => member.roles.cache.has(r));
+    }
+
     eligibleMembers(campaign: Campaign): GuildMember[] {
         const guild = this.guild();
         if (!guild) return [];
@@ -418,6 +434,7 @@ export class ConfirmationService {
         const exclude = new Set(campaign.excludeRoleIds);
         return [...guild.members.cache.values()].filter(m => {
             if (m.user.bot) return false;
+            if (!this.hasRequiredRole(campaign, m)) return false;
             if ([...exclude].some(r => m.roles.cache.has(r))) return false;
             if (campaign.skipResponded) {
                 if (responded.has(m.id)) return false;

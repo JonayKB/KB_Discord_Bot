@@ -131,6 +131,24 @@ const MIGRATIONS: string[] = [
         expires_at INTEGER NOT NULL
     );
     `,
+    /* v2: servidores de juego + filtros nuevos en campañas */ `
+    CREATE TABLE game_servers (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        name         TEXT NOT NULL,
+        type         TEXT NOT NULL CHECK (type IN ('minecraft','hytale')),
+        host         TEXT NOT NULL,
+        port         INTEGER,             -- puerto del juego (Minecraft: 25565 por defecto)
+        api_port     INTEGER,             -- Minecraft: API de Spark (TPS/CPU) | Hytale: API Nitrado Query
+        enabled      INTEGER NOT NULL DEFAULT 1,
+        link_players INTEGER NOT NULL DEFAULT 1,  -- mencionar en Discord a los jugadores confirmados
+        channel_id   TEXT,                -- mensaje de estado en Discord (opcional)
+        message_id   TEXT,
+        created_at   INTEGER NOT NULL
+    );
+
+    ALTER TABLE campaigns ADD COLUMN include_role_ids TEXT NOT NULL DEFAULT '[]';
+    ALTER TABLE campaigns ADD COLUMN input_long INTEGER NOT NULL DEFAULT 0;
+    `,
 ];
 
 export function openDb(file = path.join(DATA_DIR, 'bot.db')): DB {

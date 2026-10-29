@@ -5,7 +5,6 @@ import { Cron } from "croner";
 import loadCommands from './commands/index';
 import loadEvents from './events/index';
 import { loadConfig } from './utils/configManager';
-import updateInfoMessage from "./utils/updateInfoMessage";
 import { Logger } from "./utils/Logger";
 import compressLogs from "./utils/LogCompreser";
 
@@ -13,7 +12,7 @@ import { openDb } from "./core/db";
 import { startLogCapture } from "./core/logs";
 import { ModuleManager } from "./core/module";
 import { setServices } from "./core/services";
-import { migrateLegacy } from "./core/migrateLegacy";
+import { migrateLegacy, migrateServers } from "./core/migrateLegacy";
 import { startWebServer } from "./web/server";
 
 import { MessagesService, createMessagesModule } from "./modules/messages";
@@ -22,6 +21,7 @@ import { ConfirmationService } from "./modules/confirmations/service";
 import { createConfirmationsModule } from "./modules/confirmations";
 import { SchedulerService } from "./modules/scheduler/service";
 import { createSchedulerModule } from "./modules/scheduler";
+import { ServersService, createServersModule } from "./modules/servers";
 
 startLogCapture();
 const logger = new Logger("Index");
@@ -80,12 +80,14 @@ const messages = new MessagesService(client, db);
 const confirmations = new ConfirmationService(client, db, messages);
 const inbox = new InboxService(db, messages);
 const scheduler = new SchedulerService(db, messages, confirmations);
-setServices({ messages, confirmations });
+const servers = new ServersService(client, db, confirmations);
+setServices({ messages, confirmations, servers });
 
 manager.register(createMessagesModule(messages, db));
 manager.register(createInboxModule(inbox, messages, db));
 manager.register(createSchedulerModule(scheduler));
 manager.register(createConfirmationsModule(confirmations));
+manager.register(createServersModule(servers));
 
 // ───────────── Código "clásico" (info del servidor, roles por reacción, bienvenida) ─────────────
 loadCommands(client);
@@ -112,6 +114,7 @@ client.once('clientReady', async () => {
     // Migra una sola vez la configuración antigua a la base de datos y arranca los módulos activos.
     try {
         migrateLegacy(db);
+        migrateServers(db);
     } catch (err) {
         logger.error('❌ Falló la migración de datos antiguos', err);
     }
@@ -135,10 +138,7 @@ client.once('clientReady', async () => {
         });
     }, timeInterval * 60 * 1000);
 
-    // Info message: initial update and then every 30 seconds
-    const refreshInfo = () => updateInfoMessage(client).catch(err => logger.error('Error actualizando el mensaje de estado', err));
-    refreshInfo();
-    setInterval(refreshInfo, 30 * 1000);
+    // El mensaje de estado de los servidores de juego lo mantiene ahora el módulo "Servidores de juego".
 
     // Compress logs every day at midnight
     try {
@@ -158,6 +158,7 @@ async function shutdown(signal: string) {
     closing = true;
     logger.info(`🛑 ${signal} recibido, cerrando…`);
     scheduler.stop();
+    servers.stop();
     server?.close();
     await client.destroy();
     db.close();

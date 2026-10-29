@@ -14,13 +14,15 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kbbot-smoke-'));
 fs.mkdirSync(path.join(tmp, 'data'));
 fs.writeFileSync(path.join(tmp, 'data', 'names.json'), JSON.stringify({ steve_dc: 'Steve', alex_dc: 'Alex', ghost_dc: 'Ghost' }));
 fs.writeFileSync(path.join(tmp, 'data', 'denied_reasons.json'), JSON.stringify({ nope_dc: 'No me apetece' }));
-fs.writeFileSync(path.join(tmp, 'data', 'config.json'), JSON.stringify({ rolContadoID: 'R_OK', canalID: 'C_COUNT', mensajeID: 'M_COUNT' }));
+fs.writeFileSync(path.join(tmp, 'data', 'config.json'), JSON.stringify({ rolContadoID: 'R_OK', canalID: 'C_COUNT', mensajeID: 'M_COUNT', canalInfoID: 'C1', mensajeInfoID: 'M_INFO' }));
 process.chdir(tmp);
 
 const PORT = 38123;
 Object.assign(process.env, {
     TOKEN: 'x', CLIENT_ID: '1', GUILD_ID: 'G1', ADMIN_ID: 'ADMIN', PANEL_PORT: String(PORT), PANEL_URL: `http://127.0.0.1:${PORT}`,
     PANEL_DEV_AUTH: '1', NODE_ENV: 'test', PANEL_HOST: '127.0.0.1',
+    // Variables antiguas del estado del servidor: se importan una vez como servidor de juego.
+    SERVER_TYPE: 'MINECRAFT', MINECRAFT_SERVER_IP: '127.0.0.1', MINECRAFT_SERVER_PORT: '38200', MINECRAFT_API_PORT: '38201',
 });
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -41,8 +43,10 @@ async function main() {
     const { createConfirmationsModule } = await import(src('modules/confirmations'));
     const { SchedulerService } = await import(src('modules/scheduler/service'));
     const { createSchedulerModule } = await import(src('modules/scheduler'));
+    const { ServersService, createServersModule } = await import(src('modules/servers'));
+    const { startFakeMinecraft, startFakeSpark } = await import('./fake-game-servers');
     const { startWebServer } = await import(src('web/server'));
-    const { migrateLegacy } = await import(src('core/migrateLegacy'));
+    const { migrateLegacy, migrateServers } = await import(src('core/migrateLegacy'));
     const { setServices } = await import(src('core/services'));
     const { startLogCapture } = await import(src('core/logs'));
     startLogCapture();
@@ -67,13 +71,19 @@ async function main() {
     const confirmations = new ConfirmationService(client, db, messages);
     const inbox = new InboxService(db, messages);
     const scheduler = new SchedulerService(db, messages, confirmations);
-    setServices({ messages, confirmations });
+    const gameServers = new ServersService(client, db, confirmations);
+    setServices({ messages, confirmations, servers: gameServers });
     manager.register(createMessagesModule(messages, db));
     manager.register(createInboxModule(inbox, messages, db));
     manager.register(createSchedulerModule(scheduler));
     manager.register(createConfirmationsModule(confirmations));
+    manager.register(createServersModule(gameServers));
+    const fakeMc = startFakeMinecraft(38200, { online: 2, max: 20, players: ['Steve', 'Alex'], version: 'Paper 1.21.1', motd: 'MCKB Survival' });
+    const fakeSpark = startFakeSpark(38201);
     migrateLegacy(db);
     migrateLegacy(db); // idempotente
+    migrateServers(db);
+    migrateServers(db); // idempotente
     await manager.startEnabled();
     const server = startWebServer({ client, db, manager });
     await new Promise(r => server.once('listening', r));
@@ -291,6 +301,95 @@ async function main() {
     assert.equal(form.opts.components[0].components.length, 1, 'sin botón de rechazo');
     ok('varias campañas a la vez, cada una con sus botones');
 
+    // Campaña solo para quien tenga un rol (p. ej. preguntar el modpack solo a los confirmados) y con respuesta larga
+    const camp3 = await call('POST', '/api/confirmations/campaigns', {
+        name: 'Modpack', title: '¿Qué modpack?', description: 'Cuéntanos', includeRoleIds: ['R_OK'], inputLong: true, allowDeny: false, sendOnJoin: true, setNickname: false,
+    });
+    assert.equal(camp3.status, 201);
+    assert.deepEqual(camp3.json.includeRoleIds, ['R_OK']);
+    assert.equal(camp3.json.inputLong, true);
+    const stats3 = (await call('GET', `/api/confirmations/campaigns/${camp3.json.id}/stats`)).json;
+    assert.equal(stats3.pending, 1, 'solo U4 tiene el rol R_OK');
+    const b6 = sent.length;
+    assert.equal((await call('POST', `/api/confirmations/campaigns/${camp3.json.id}/send`, {})).json.total, 1);
+    await sleep(400);
+    assert.deepEqual(sent.slice(b6).map(x => x.to), ['U4']);
+    ok('campaña con "solo a quien tenga estos roles": envía solo a los confirmados');
+
+    let longModal: any;
+    client.emit('interactionCreate', { isButton: () => true, isModalSubmit: () => false, isRepliable: () => true, customId: `cf:open:${camp3.json.id}`, showModal: async (m: any) => { longModal = m; } });
+    await sleep(100);
+    const input = longModal.components[0].components[0].data;
+    assert.equal(input.style, 2, 'párrafo');
+    assert.equal(input.max_length, 1000);
+    const longAnswer = 'All the Mods 10, porque '.padEnd(600, 'x');
+    const longReplies: string[] = [];
+    client.emit('interactionCreate', {
+        isButton: () => false, isModalSubmit: () => true, isRepliable: () => true, customId: `cf:modal:${camp3.json.id}`, user: members.get('U4').user,
+        fields: { fields: new Collection([['answer', { value: longAnswer }]]) },
+        deferReply: async () => undefined, editReply: async (m: string) => longReplies.push(m),
+    });
+    await sleep(300);
+    const e3 = (await call('GET', `/api/confirmations/campaigns/${camp3.json.id}/entries`)).json;
+    assert.equal(e3[0].answer, longAnswer);
+    ok('respuesta larga: formulario de párrafo y se guarda entera');
+
+    const newbie = mock.addMember('U5', 'fresh_dc');
+    const b7 = sent.length;
+    client.emit('guildMemberAdd', newbie);
+    await sleep(300);
+    assert.ok(!sent.slice(b7).some(x => x.to === 'U5' && x.opts.components?.[0]?.components?.[0]?.data?.custom_id === `cf:open:${camp3.json.id}`));
+    members.delete('U5');
+    ok('al unirse, no se envía una campaña con roles obligatorios a quien no los tiene');
+
+    console.log('\nServidores de juego');
+    const sv = (await call('GET', '/api/servers')).json;
+    assert.equal(sv.servers.length, 1, 'el servidor del .env se importa una sola vez');
+    const mcId = sv.servers[0].id;
+    assert.equal(sv.servers[0].host, '127.0.0.1');
+    assert.equal(sv.servers[0].messageId, 'M_INFO', 'se conserva el mensaje de estado que ya existía');
+    ok('migración del .env y config.json antiguos');
+
+    const edits0 = counterEdits.length;
+    const chk = (await call('POST', `/api/servers/${mcId}/check`)).json;
+    assert.equal(chk.online, true);
+    assert.equal(chk.playersOnline, 2);
+    assert.equal(chk.version, 'Paper 1.21.1');
+    assert.equal(chk.tps.m1, 19.84);
+    assert.equal(chk.cpu, 0.37);
+    assert.equal(chk.players.find((p: any) => p.name === 'Steve').discordId, 'U1', 'Steve → steve_dc por su respuesta de confirmación');
+    const embed = counterEdits.slice(edits0).map((o: any) => o.embeds?.[0]?.data).find((d: any) => /Estado de Minecraft/.test(d?.title ?? ''));
+    assert.ok(embed, 'se edita el mensaje de estado');
+    assert.ok(embed.fields.some((f: any) => f.value.includes('<@U1>')));
+    ok('consulta online: jugadores, versión, TPS/CPU, menciones y mensaje en Discord');
+
+    assert.equal((await call('POST', '/api/servers', { name: 'H', type: 'hytale', host: 'x.com' })).status, 400);
+    const down = await call('POST', '/api/servers', { name: 'Caído', type: 'minecraft', host: 'http://127.0.0.1:38299/' });
+    assert.equal(down.status, 201);
+    assert.equal(down.json.port, 38299, 'acepta host:puerto y quita http://');
+    const t0 = Date.now();
+    const downSt = (await call('POST', `/api/servers/${down.json.id}/check`)).json;
+    assert.equal(downSt.online, false);
+    assert.match(downSt.error, /rechazada/);
+    assert.ok(Date.now() - t0 < 2000, 'un servidor caído responde rápido');
+    assert.equal((await call('POST', '/api/servers/test', { type: 'minecraft', host: '127.0.0.1', port: 38200 })).json.online, true);
+    ok('validación, servidor caído y "probar conexión"');
+
+    assert.equal((await call('PUT', '/api/servers/settings', { intervalSec: 5 })).status, 400);
+    assert.equal((await call('PUT', '/api/servers/settings', { intervalSec: 60 })).json.intervalSec, 60);
+    const ch0 = channelsSent.length;
+    assert.equal((await call('POST', `/api/servers/${down.json.id}/message`, { channelId: 'C1' })).json.channelId, 'C1');
+    assert.equal(channelsSent.length, ch0 + 1);
+    assert.equal((await call('POST', `/api/servers/${down.json.id}/message/unlink`)).json.messageId, null);
+    assert.equal((await call('DELETE', `/api/servers/${down.json.id}`)).status, 200);
+    ok('frecuencia, publicar / soltar mensaje de estado y eliminar');
+
+    await call('POST', '/api/modules/servers/enabled', { enabled: false });
+    assert.equal((await call('POST', `/api/servers/${mcId}/check`)).status, 409);
+    assert.equal((await call('GET', '/api/servers')).status, 200);
+    await call('POST', '/api/modules/servers/enabled', { enabled: true });
+    ok('módulo de servidores activable en caliente');
+
     console.log('\nMódulos en caliente');
     await call('POST', '/api/modules/messages/enabled', { enabled: false });
     assert.equal((await call('POST', '/api/messages/send', { target: { type: 'user', id: 'U1' }, payload: { content: 'x' } })).status, 409);
@@ -311,7 +410,7 @@ async function main() {
     ok('desactivar/activar la bandeja quita y pone el listener al instante');
 
     const st = (await call('GET', '/api/status')).json;
-    assert.equal(st.modules.length, 4);
+    assert.equal(st.modules.length, 5);
     assert.ok(st.stats.sent24h > 5);
     ok('estado general');
 
@@ -319,6 +418,9 @@ async function main() {
     cdn.close();
     server.close();
     scheduler.stop();
+    gameServers.stop();
+    fakeMc.close();
+    fakeSpark.close();
     process.exit(0);
 }
 
