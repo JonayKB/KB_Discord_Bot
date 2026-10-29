@@ -32,7 +32,7 @@ export interface OutgoingPayload {
     fileIds?: string[];
 }
 
-export type MessageSource = 'manual' | 'reply' | 'schedule' | 'campaign' | 'welcome' | 'system' | 'dm';
+export type MessageSource = 'manual' | 'reply' | 'schedule' | 'campaign' | 'welcome' | 'system' | 'dm' | 'ticket';
 
 export interface SendMeta {
     source: MessageSource;

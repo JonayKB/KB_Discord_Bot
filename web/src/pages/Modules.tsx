@@ -11,6 +11,7 @@ const HELP: Record<string, string> = {
     servers: 'Al desactivarlo, se deja de consultar los servidores y el mensaje de estado en Discord se queda congelado.',
     reactions: 'Al desactivarlo, reaccionar deja de dar o quitar roles. Nadie pierde los roles que ya tiene.',
     welcome: 'Al desactivarlo, no se envía nada al entrar o salir ni se dan roles automáticos.',
+    tickets: 'Al desactivarlo, los botones del panel y de los tickets dejan de responder y no se guardan los mensajes nuevos. El historial se sigue viendo.',
     moderation: 'Al desactivarlo, se deja de publicar en el canal de registro y no se pueden sancionar desde el panel. El historial se sigue viendo.',
 };
 

@@ -110,6 +110,15 @@ export function startWebServer({ client, db, manager }: WebDeps): http.Server {
             .map(c => ({ id: c.id, name: c.name, category: c.parent?.name ?? null })));
     });
 
+    api.get('/guild/categories', (_req, res) => {
+        const guild = client.guilds.cache.get(env.guildId);
+        if (!guild) throw new HttpError(503, 'El bot aún no ha cargado el servidor.');
+        res.json([...guild.channels.cache.values()]
+            .filter(c => c.type === ChannelType.GuildCategory)
+            .sort((a, b) => ('position' in a ? a.position : 0) - ('position' in b ? b.position : 0))
+            .map(c => ({ id: c.id, name: c.name })));
+    });
+
     // ── Módulos (activar / desactivar en caliente) ──
     api.get('/modules', (_req, res) => res.json(manager.list()));
     api.post('/modules/:id/enabled', asyncRoute(async (req, res) => {

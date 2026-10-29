@@ -13,6 +13,7 @@ import Servers from './pages/Servers';
 import Reactions from './pages/Reactions';
 import Welcome from './pages/Welcome';
 import Moderation from './pages/Moderation';
+import Tickets from './pages/Tickets';
 import Modules from './pages/Modules';
 import Logs from './pages/Logs';
 
@@ -29,6 +30,7 @@ const NAV = [
     ['reactions', 'Roles por reacción', 'smile'],
     ['welcome', 'Bienvenida', 'wave'],
     ['moderation', 'Moderación', 'shield'],
+    ['tickets', 'Tickets', 'ticket'],
     ['modules', 'Módulos', 'grid'],
     ['logs', 'Registros', 'terminal'],
 ] as const;
@@ -50,6 +52,7 @@ function Login() {
 export default function App() {
     const [me, setMe] = useState<Me | null | undefined>(undefined);
     const [unread, setUnread] = useState(0);
+    const [waitingTickets, setWaitingTickets] = useState(0);
     const parts = useHash();
     const page = parts[0] ?? 'dashboard';
     const connected = useLiveConnected();
@@ -65,8 +68,13 @@ export default function App() {
         if (!me) return;
         startLive();
         get<{ unreadTotal: number }>('/inbox/conversations').then(r => setUnread(r.unreadTotal)).catch(() => undefined);
+        refreshTickets();
         return stopLive;
     }, [me]);
+
+    const refreshTickets = useCallback(() => {
+        get<{ counts: { waiting: number } }>('/tickets?status=open').then(r => setWaitingTickets(r.counts.waiting)).catch(() => undefined);
+    }, []);
 
     const refreshUnread = useCallback(() => {
         get<{ unreadTotal: number }>('/inbox/conversations').then(r => setUnread(r.unreadTotal)).catch(() => undefined);
@@ -74,6 +82,7 @@ export default function App() {
 
     useLive(e => {
         if (e.type === 'inbox:read' || (e.type === 'message:new' && e.data?.direction === 'in')) refreshUnread();
+        if (e.type === 'tickets:message' || e.type === 'tickets:changed') refreshTickets();
     });
 
     const logout = async () => {
@@ -84,7 +93,7 @@ export default function App() {
     if (me === undefined) return <div className="login"><Spinner /></div>;
     if (me === null) return <Login />;
 
-    const flush = page === 'inbox';
+    const flush = page === 'inbox' || (page === 'tickets' && parts[1] !== 'panels' && parts[1] !== 'settings');
     return (
         <ConfirmProvider>
             <div className="app">
@@ -95,6 +104,7 @@ export default function App() {
                             <a key={id} href={`#/${id}`} className={page === id ? 'active' : ''}>
                                 <Icon name={icon} /> {label}
                                 {id === 'inbox' && unread > 0 && <span className="count">{unread > 99 ? '99+' : unread}</span>}
+                                {id === 'tickets' && waitingTickets > 0 && <span className="count" title="Tickets esperando respuesta">{waitingTickets > 99 ? '99+' : waitingTickets}</span>}
                             </a>
                         ))}
                     </nav>
@@ -117,6 +127,7 @@ export default function App() {
                     {page === 'reactions' && <Reactions />}
                     {page === 'welcome' && <Welcome />}
                     {page === 'moderation' && <Moderation />}
+                    {page === 'tickets' && <Tickets sub={parts[1]} />}
                     {page === 'modules' && <Modules />}
                     {page === 'logs' && <Logs />}
                     {!NAV.some(n => n[0] === page) && <Dashboard />}
