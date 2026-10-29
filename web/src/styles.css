@@ -338,3 +338,8 @@ td.shrink, th.shrink { width: 1%; white-space: nowrap; }
 .ticket-info dt { color: var(--muted); display: inline; }
 .ticket-info dd { display: inline; margin: 0 0 0 4px; }
 .closed-bar { padding: 12px 20px; border-top: 1px solid var(--border); background: var(--panel); color: var(--muted); font-size: 13px; }
+
+/* ───── Consola RCON ───── */
+.console { background: #0b0d12; color: #d7dbe3; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; font-family: var(--mono); font-size: 12.5px; max-height: 240px; min-height: 90px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; }
+.console .cmd { color: #8ab4ff; }
+.console .err { color: #ff8a8a; }

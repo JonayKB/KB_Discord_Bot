@@ -214,6 +214,7 @@ export interface GameServer {
     messageId: string | null;
     createdAt: number;
     status: ServerStatus | null;
+    rcon: { port: number | null; hasPassword: boolean };
 }
 
 export type ReactionBehavior = 'toggle' | 'add' | 'remove' | 'reverse' | 'click';
@@ -288,3 +289,12 @@ export interface TicketMessage {
 }
 export interface TicketsConfig { logChannelId: string | null; deleteOnClose: boolean; closeDelaySec: number; dmOnClose: boolean; attachTranscript: boolean }
 export interface Category { id: string; name: string }
+
+export interface WhitelistSettings {
+    serverId: number; enabled: boolean; campaignId: number | null; onlineMode: boolean; allowRename: boolean; renameCooldownDays: number; removeOnLeave: boolean;
+}
+export type WhitelistStatus = 'pending_add' | 'active' | 'pending_remove' | 'removed' | 'error';
+export interface WhitelistEntry {
+    id: number; serverId: number; userId: string; username: string | null; mcName: string; mcUuid: string | null; status: WhitelistStatus;
+    preexisting: boolean; source: 'form' | 'panel' | 'import'; addedBy: string | null; error: string | null; removedReason: string | null; createdAt: number; updatedAt: number;
+}

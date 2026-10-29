@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { del, get, post, put, type GameServer, type ModuleInfo, type ServerHistory, type ServerKind, type ServerStatus } from '../api';
 import { TimeChart, UptimeStrip, fmtTipTime } from '../charts';
+import ServerRcon from './ServerRcon';
 import { fmtDateTime, fmtRelative } from '../format';
 import { useLive } from '../live';
 import { Check, ChannelSelect, Empty, Icon, Modal, PageHead, Spinner, Switch, errMsg, toast, useConfirm, useGuildData } from '../ui';
@@ -115,6 +116,7 @@ function ServerCard({ server: s, busy, running, channelName, onCheck, onEdit, on
 }) {
     const st = s.status;
     const [showStats, setShowStats] = useState(false);
+    const [showRcon, setShowRcon] = useState(false);
     const state = !s.enabled ? 'paused' : !st ? 'unknown' : st.online ? 'online' : 'offline';
     const fill = st && st.maxPlayers > 0 ? Math.min(st.playersOnline / st.maxPlayers, 1) : 0;
 
@@ -131,6 +133,7 @@ function ServerCard({ server: s, busy, running, channelName, onCheck, onEdit, on
                     <label className="row small muted">Activo <Switch checked={s.enabled} disabled={!running} onChange={onToggle} label="Consultar este servidor" /></label>
                     <button className="btn sm" disabled={!running || !s.enabled || busy} onClick={onCheck}><Icon name="refresh" size={14} /> {busy ? 'Consultando…' : 'Comprobar'}</button>
                     <button className={`btn sm ${showStats ? 'primary' : ''}`} onClick={() => setShowStats(v => !v)} aria-expanded={showStats}><Icon name="chart" size={14} /> Estadísticas</button>
+                    {s.type === 'minecraft' && <button className={`btn sm ${showRcon ? 'primary' : ''}`} onClick={() => setShowRcon(v => !v)} aria-expanded={showRcon}><Icon name="terminal" size={14} /> RCON</button>}
                     <button className="btn sm" disabled={!running} onClick={onEdit}><Icon name="edit" size={14} /> Editar</button>
                     <button className="btn sm danger" disabled={!running} onClick={onDelete} aria-label="Eliminar servidor"><Icon name="trash" size={14} /></button>
                 </div>
@@ -203,6 +206,7 @@ function ServerCard({ server: s, busy, running, channelName, onCheck, onEdit, on
             )}
 
             {showStats && <><div className="sep" /><ServerStats server={s} /></>}
+            {showRcon && s.type === 'minecraft' && <><div className="sep" /><ServerRcon server={s} running={running} /></>}
 
             <div className="sep" />
             <div className="row between wrap">

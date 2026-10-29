@@ -130,8 +130,21 @@ export const toCampaign = (r: CampaignRow): Campaign => ({
     createdAt: r.created_at,
 });
 
+/**
+ * Otros módulos (p. ej. la whitelist de los servidores) pueden validar y reaccionar a las respuestas.
+ */
+export interface ConfirmationHooks {
+    /** Antes de guardar una confirmación. Devuelve `error` para rechazarla o `answer` para corregirla (p. ej. mayúsculas). */
+    validate?(campaignId: number, userId: string, answer: string, opts: { fromPanel: boolean }): Promise<{ error?: string; answer?: string }>;
+    /** Después de guardar una confirmación. Lo devuelto se le muestra al usuario. */
+    confirmed?(campaignId: number, userId: string, answer: string, opts: { fromPanel: boolean }): Promise<string[]>;
+    /** El usuario deja de estar confirmado (no participa o se le borra). */
+    removed?(campaignId: number, userId: string, reason: string): Promise<void>;
+}
+
 export class ConfirmationService {
     private refreshTimers = new Map<number, NodeJS.Timeout>();
+    private readonly hooks: ConfirmationHooks[] = [];
     /** Solo true mientras el módulo está activo. */
     active = false;
 
@@ -140,6 +153,10 @@ export class ConfirmationService {
         private readonly db: DB,
         private readonly messages: MessagesService
     ) {}
+
+    addHooks(h: ConfirmationHooks): void {
+        this.hooks.push(h);
+    }
 
     guild(): Guild | undefined {
         return this.client.guilds.cache.get(env.guildId);
@@ -299,12 +316,24 @@ export class ConfirmationService {
         userId: string,
         status: 'confirmed' | 'denied',
         data: { answer?: string; reason?: string },
-        opts: { applyRoles?: boolean } = {}
+        opts: { applyRoles?: boolean; fromPanel?: boolean; notes?: string[] } = {}
     ): Promise<string[]> {
         const campaign = this.requireCampaign(campaignId);
         const guild = this.guild();
         const warnings: string[] = [];
         const applyRoles = opts.applyRoles ?? true;
+        const fromPanel = opts.fromPanel ?? false;
+
+        // Los módulos enganchados pueden rechazar o corregir la respuesta ANTES de guardar nada.
+        if (status === 'confirmed' && data.answer) {
+            let answer = data.answer;
+            for (const h of this.hooks) {
+                const r = await h.validate?.(campaignId, userId, answer, { fromPanel });
+                if (r?.error) throw new BotError(r.error);
+                if (r?.answer) answer = r.answer;
+            }
+            data = { ...data, answer };
+        }
 
         const member = guild ? (guild.members.cache.get(userId) ?? await guild.members.fetch(userId).catch(() => undefined)) : undefined;
         const user = member?.user ?? await this.client.users.fetch(userId).catch(() => undefined);
@@ -350,6 +379,16 @@ export class ConfirmationService {
             warnings.push('El usuario no está en el servidor: solo se guardó la respuesta.');
         }
 
+        for (const h of this.hooks) {
+            try {
+                if (status === 'confirmed' && data.answer) opts.notes?.push(...(await h.confirmed?.(campaignId, userId, data.answer, { fromPanel }) ?? []));
+                else await h.removed?.(campaignId, userId, 'Ha indicado que no participa');
+            } catch (err) {
+                warnings.push((err as Error).message);
+                logger.error('Error en un módulo enganchado a las confirmaciones', err);
+            }
+        }
+
         this.scheduleRefresh(campaignId);
         return warnings;
     }
@@ -384,6 +423,7 @@ export class ConfirmationService {
             }
             this.db.prepare('DELETE FROM confirmations WHERE campaign_id = ? AND user_id = ?').run(campaignId, userId);
             removed++;
+            for (const h of this.hooks) await h.removed?.(campaignId, userId, 'Borrado de la campaña').catch(err => warnings.push((err as Error).message));
         }
         publish('confirmations:changed', { campaignId });
         this.scheduleRefresh(campaignId);

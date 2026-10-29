@@ -8,7 +8,7 @@ import {
 } from 'discord.js';
 import { Router } from 'express';
 import { publish } from '../../core/bus';
-import { HttpError, asyncRoute, bool, int, str, strArray } from '../../core/http';
+import { BotError, HttpError, asyncRoute, bool, int, str, strArray } from '../../core/http';
 import type { BotModule } from '../../core/module';
 import { Logger } from '../../utils/Logger';
 import type { Campaign, CampaignInput, ConfirmationService } from './service';
@@ -112,12 +112,13 @@ export function createConfirmationsModule(service: ConfirmationService): BotModu
         const id = int(req.params.id, 'id', { min: 1 });
         const userId = str(req.body?.userId, 'userId', { required: true, max: 40 });
         const status = req.body?.status === 'denied' ? 'denied' : 'confirmed';
+        const notes: string[] = [];
         const warnings = await service.respond(
             id, userId, status,
             { answer: str(req.body?.answer, 'answer', { max: 1000 }), reason: str(req.body?.reason, 'reason', { max: 1000 }) },
-            { applyRoles: req.body?.applyRoles === undefined ? true : bool(req.body.applyRoles) }
+            { applyRoles: req.body?.applyRoles === undefined ? true : bool(req.body.applyRoles), fromPanel: true, notes }
         );
-        res.status(201).json({ ok: true, warnings });
+        res.status(201).json({ ok: true, warnings, notes });
     }));
 
     router.post('/campaigns/:id/entries/delete', asyncRoute(async (req, res) => {
@@ -214,12 +215,21 @@ export function createConfirmationsModule(service: ConfirmationService): BotModu
                     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
                     ctx.logger.info(`📝 ${isDeny ? 'Denegación' : 'Confirmación'} de ${interaction.user.username} en "${campaign.name}": ${value}`);
 
-                    const warnings = await service.respond(
-                        campaign.id, interaction.user.id, isDeny ? 'denied' : 'confirmed',
-                        isDeny ? { reason: value } : { answer: value }
-                    );
+                    const notes: string[] = [];
+                    let warnings: string[];
+                    try {
+                        warnings = await service.respond(
+                            campaign.id, interaction.user.id, isDeny ? 'denied' : 'confirmed',
+                            isDeny ? { reason: value } : { answer: value }, { notes }
+                        );
+                    } catch (err) {
+                        // Respuesta rechazada (p. ej. nombre ya registrado por otro): se le explica y puede volver a intentarlo.
+                        if (err instanceof BotError) return void await interaction.editReply(`❌ ${err.message}`);
+                        throw err;
+                    }
                     if (warnings.length) publish('confirmations:warning', { campaignId: campaign.id, userId: interaction.user.id, warnings });
-                    await interaction.editReply(isDeny ? '¡Recibido! Espero verte en otra ocasión. 😊' : '¡Recibido! Gracias por tu respuesta.');
+                    const base = isDeny ? '¡Recibido! Espero verte en otra ocasión. 😊' : '¡Recibido! Gracias por tu respuesta.';
+                    await interaction.editReply([base, ...notes].join('\n'));
                 }
             });
         },
