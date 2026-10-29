@@ -112,3 +112,37 @@ export function migrateServers(db: DB): void {
         setSetting(db, 'migrated.servers_v1', '1');
     })();
 }
+
+interface LegacyReaction { canalID?: string; mensajeID?: string; rolID?: string; roleID?: string; emoji?: string }
+
+/**
+ * Se ejecuta una sola vez: pasa los roles por reacción de config.json (comando /setreaction)
+ * a la sección "Roles por reacción" con el comportamiento de siempre (reaccionar da el rol,
+ * quitar la reacción lo quita). Se agrupan por mensaje; no se toca config.json ni los roles de nadie.
+ */
+export function migrateReactions(db: DB): void {
+    if (getSetting(db, 'migrated.reactions_v1', '0') === '1') return;
+    const list = (readJson<{ reactions?: LegacyReaction[] }>('config.json')?.reactions ?? [])
+        .filter(r => r && r.mensajeID && r.emoji && (r.rolID || r.roleID));
+
+    const byMessage = new Map<string, LegacyReaction[]>();
+    for (const r of list) byMessage.set(r.mensajeID!, [...(byMessage.get(r.mensajeID!) ?? []), r]);
+
+    db.transaction(() => {
+        const insPanel = db.prepare(`
+            INSERT INTO reaction_panels (name, enabled, exclusive, channel_id, message_id, manage_embed, title, description, show_list, legacy, created_at)
+            VALUES (?, 1, 0, ?, ?, 0, '', '', 0, 1, ?)
+        `);
+        const insEntry = db.prepare("INSERT INTO reaction_roles (panel_id, emoji, role_id, behavior, position) VALUES (?, ?, ?, 'toggle', ?)");
+        let n = 0;
+        for (const [messageId, rows] of byMessage) {
+            const exists = db.prepare('SELECT 1 FROM reaction_panels WHERE message_id = ?').get(messageId);
+            if (exists) continue;
+            const panelId = Number(insPanel.run(`Roles por reacción #${++n}`, rows[0].canalID ?? null, messageId, Date.now()).lastInsertRowid);
+            rows.forEach((r, i) => insEntry.run(panelId, r.emoji, r.rolID ?? r.roleID, i));
+        }
+        setSetting(db, 'migrated.reactions_v1', '1');
+    })();
+
+    if (list.length) logger.info(`✅ ${list.length} roles por reacción importados de config.json (${byMessage.size} mensajes).`);
+}

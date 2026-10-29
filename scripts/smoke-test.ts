@@ -14,7 +14,14 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kbbot-smoke-'));
 fs.mkdirSync(path.join(tmp, 'data'));
 fs.writeFileSync(path.join(tmp, 'data', 'names.json'), JSON.stringify({ steve_dc: 'Steve', alex_dc: 'Alex', ghost_dc: 'Ghost' }));
 fs.writeFileSync(path.join(tmp, 'data', 'denied_reasons.json'), JSON.stringify({ nope_dc: 'No me apetece' }));
-fs.writeFileSync(path.join(tmp, 'data', 'config.json'), JSON.stringify({ rolContadoID: 'R_OK', canalID: 'C_COUNT', mensajeID: 'M_COUNT', canalInfoID: 'C1', mensajeInfoID: 'M_INFO' }));
+fs.writeFileSync(path.join(tmp, 'data', 'config.json'), JSON.stringify({
+    rolContadoID: 'R_OK', canalID: 'C_COUNT', mensajeID: 'M_COUNT', canalInfoID: 'C1', mensajeInfoID: 'M_INFO',
+    // Roles por reacción antiguos (/setreaction): el emoji personalizado solo guardaba el nombre.
+    reactions: [
+        { canalID: 'C1', mensajeID: 'M_OLD', rolID: 'R_PING', emoji: 'kbheart' },
+        { canalID: 'C1', mensajeID: 'M_OLD', rolID: 'R_NEWS', emoji: '📰' },
+    ],
+}));
 process.chdir(tmp);
 
 const PORT = 38123;
@@ -44,9 +51,10 @@ async function main() {
     const { SchedulerService } = await import(src('modules/scheduler/service'));
     const { createSchedulerModule } = await import(src('modules/scheduler'));
     const { ServersService, createServersModule } = await import(src('modules/servers'));
+    const { ReactionRolesService, createReactionsModule } = await import(src('modules/reactions'));
     const { startFakeMinecraft, startFakeSpark } = await import('./fake-game-servers');
     const { startWebServer } = await import(src('web/server'));
-    const { migrateLegacy, migrateServers } = await import(src('core/migrateLegacy'));
+    const { migrateLegacy, migrateReactions, migrateServers } = await import(src('core/migrateLegacy'));
     const { setServices } = await import(src('core/services'));
     const { startLogCapture } = await import(src('core/logs'));
     startLogCapture();
@@ -63,6 +71,8 @@ async function main() {
     for (const i of ['U1', 'U2', 'U3']) roleAll.members.set(i, members.get(i));
     mock.addChannel('C1', 'general');
     mock.addChannel('C_COUNT', 'contador');
+    for (const [id, name] of [['R_PING', 'Avisos'], ['R_NEWS', 'Noticias'], ['R_A', 'A'], ['R_VER', 'Verificado'], ['R_UNVER', 'Sin verificar'], ['R_B', 'B'], ['R_C', 'C'], ['R_RED', 'Rojo'], ['R_BLUE', 'Azul']]) mock.addRole(id, name);
+    mock.addEmoji('111111111111111111', 'kbheart');
 
     // ── Servicios (igual que index.ts) ──
     const db = openDb();
@@ -72,18 +82,22 @@ async function main() {
     const inbox = new InboxService(db, messages);
     const scheduler = new SchedulerService(db, messages, confirmations);
     const gameServers = new ServersService(client, db, confirmations);
-    setServices({ messages, confirmations, servers: gameServers });
+    const reactions = new ReactionRolesService(client, db);
+    setServices({ messages, confirmations, servers: gameServers, reactions });
     manager.register(createMessagesModule(messages, db));
     manager.register(createInboxModule(inbox, messages, db));
     manager.register(createSchedulerModule(scheduler));
     manager.register(createConfirmationsModule(confirmations));
     manager.register(createServersModule(gameServers));
+    manager.register(createReactionsModule(reactions));
     const fakeMc = startFakeMinecraft(38200, { online: 2, max: 20, players: ['Steve', 'Alex'], version: 'Paper 1.21.1', motd: 'MCKB Survival' });
     const fakeSpark = startFakeSpark(38201);
     migrateLegacy(db);
     migrateLegacy(db); // idempotente
     migrateServers(db);
     migrateServers(db); // idempotente
+    migrateReactions(db);
+    migrateReactions(db); // idempotente
     await manager.startEnabled();
     const server = startWebServer({ client, db, manager });
     await new Promise(r => server.once('listening', r));
@@ -390,6 +404,122 @@ async function main() {
     await call('POST', '/api/modules/servers/enabled', { enabled: true });
     ok('módulo de servidores activable en caliente');
 
+    console.log('\nRoles por reacción');
+    const has = (u: string, r: string) => members.get(u).roles.cache.has(r);
+    const react = async (m: string, e: string, u: string, add = true) => { mock.userReact(m, e, u, add); await sleep(60); };
+    const HEART = '<:kbheart:111111111111111111>';
+
+    let panels = (await call('GET', '/api/reactions')).json.panels;
+    assert.equal(panels.length, 1, 'un panel por mensaje antiguo');
+    assert.equal(panels[0].legacy, true);
+    assert.equal(panels[0].messageId, 'M_OLD');
+    assert.equal(panels[0].manageEmbed, false, 'el mensaje antiguo no se reescribe');
+    assert.deepEqual(panels[0].entries.map((e: any) => [e.emoji, e.roleId, e.behavior]), [[HEART, 'R_PING', 'toggle'], ['📰', 'R_NEWS', 'toggle']]);
+    ok('los roles por reacción de config.json se importan (y el emoji personalizado recupera su ID)');
+
+    await react('M_OLD', HEART, 'U3');
+    assert.ok(has('U3', 'R_PING'));
+    await react('M_OLD', HEART, 'U3', false);
+    assert.ok(!has('U3', 'R_PING'));
+    ok('normal: reaccionar da el rol y quitar la reacción lo quita (como antes)');
+
+    assert.equal((await call('POST', '/api/reactions', { name: 'X', channelId: 'C1', entries: [{ emoji: ':nope:', roleId: 'R_A' }] })).status, 400);
+    assert.equal((await call('POST', '/api/reactions', { name: 'X', channelId: 'C1', entries: [] })).status, 400);
+    assert.equal((await call('POST', '/api/reactions', { name: 'X', channelId: 'C1', entries: [{ emoji: '🅰️', roleId: 'R_A', behavior: 'magic' }] })).status, 400);
+    ok('validación (emoji inexistente, sin reacciones, comportamiento desconocido)');
+
+    const ch1 = channelsSent.length;
+    const rxNew = await call('POST', '/api/reactions', {
+        name: 'Roles', channelId: 'C1', source: 'new', title: 'Elige tus roles', description: 'Reacciona abajo', color: '#ff0000',
+        entries: [
+            { emoji: '🅰️', roleId: 'R_A', behavior: 'add' },
+            { emoji: '✅', roleId: 'R_VER', behavior: 'add', label: 'Acepto las normas' },
+            { emoji: '✅', roleId: 'R_UNVER', behavior: 'remove' },
+            { emoji: ':kbheart:', roleId: 'R_B', behavior: 'click' },
+            { emoji: '🔁', roleId: 'R_C', behavior: 'reverse' },
+        ],
+    });
+    assert.equal(rxNew.status, 201, JSON.stringify(rxNew.json));
+    assert.deepEqual(rxNew.json.warnings, []);
+    const P = rxNew.json.panel;
+    assert.equal(channelsSent.length, ch1 + 1);
+    assert.match(channelsSent.at(-1).embeds[0].data.description, /✅ → <@&R_VER> — Acepto las normas · \*permanente\*/);
+    assert.equal(P.entries[3].emoji, HEART, ':nombre: se convierte en el emoji del servidor');
+    const msgP = mock.getMessage(P.messageId);
+    assert.equal(msgP.reactions.cache.filter((r: any) => r.me).size, 4, 'el bot pone una reacción por emoji distinto');
+    ok('crear y publicar un mensaje con varias reacciones');
+
+    await react(P.messageId, '🅰️', 'U1');
+    await react(P.messageId, '🅰️', 'U1', false);
+    assert.ok(has('U1', 'R_A'));
+    ok('permanente: quitar la reacción no quita el rol');
+
+    members.get('U2').roles.cache.set('R_UNVER', { id: 'R_UNVER' });
+    await react(P.messageId, '✅', 'U2');
+    assert.ok(has('U2', 'R_VER') && !has('U2', 'R_UNVER'));
+    await react(P.messageId, '✅', 'U2', false);
+    assert.ok(has('U2', 'R_VER') && !has('U2', 'R_UNVER'));
+    ok('un mismo emoji puede dar un rol y quitar otro ("verificarse")');
+
+    await react(P.messageId, HEART, 'U1');
+    assert.ok(has('U1', 'R_B'));
+    assert.ok(!msgP.reactions.cache.get('111111111111111111').userIds.has('U1'), 'el bot borra la reacción');
+    assert.ok(has('U1', 'R_B'), 'borrar la reacción no quita el rol');
+    await react(P.messageId, HEART, 'U1');
+    assert.ok(!has('U1', 'R_B'));
+    ok('pulsar: cada reacción da o quita el rol y la reacción desaparece');
+
+    members.get('U1').roles.cache.set('R_C', { id: 'R_C' });
+    await react(P.messageId, '🔁', 'U1');
+    assert.ok(!has('U1', 'R_C'));
+    await react(P.messageId, '🔁', 'U1', false);
+    assert.ok(has('U1', 'R_C'));
+    ok('invertido: reaccionar quita el rol y quitar la reacción lo devuelve');
+
+    const ex = (await call('POST', '/api/reactions', {
+        name: 'Equipo', channelId: 'C1', exclusive: true,
+        entries: [{ emoji: '🔴', roleId: 'R_RED' }, { emoji: '🔵', roleId: 'R_BLUE' }],
+    })).json.panel;
+    await react(ex.messageId, '🔴', 'U3');
+    await react(ex.messageId, '🔵', 'U3');
+    assert.ok(has('U3', 'R_BLUE') && !has('U3', 'R_RED'));
+    assert.ok(!mock.getMessage(ex.messageId).reactions.cache.get('🔴').userIds.has('U3'), 'se quita la reacción anterior');
+    assert.ok(has('U3', 'R_BLUE'), 'quitar la reacción anterior no afecta al rol nuevo');
+    ok('exclusivo: elegir otro rol quita el anterior y su reacción');
+
+    await call('POST', `/api/reactions/${ex.id}/enabled`, { enabled: false });
+    await react(ex.messageId, '🔴', 'U2');
+    assert.ok(!has('U2', 'R_RED'));
+    await call('POST', `/api/reactions/${ex.id}/enabled`, { enabled: true });
+    ok('pausar un mensaje deja de reaccionar sin borrarlo');
+
+    const upd = await call('PUT', `/api/reactions/${P.id}`, { ...P, entries: P.entries.filter((e: any) => e.emoji !== '🅰️') });
+    assert.equal(upd.status, 200);
+    assert.ok(!msgP.reactions.cache.get('🅰️').me, 'el bot retira su reacción del emoji eliminado');
+    assert.ok(has('U1', 'R_A'), 'quien ya tenía el rol lo conserva');
+    ok('editar: quitar una reacción no le quita el rol a nadie');
+
+    const linked = await call('POST', '/api/reactions', { name: 'Ajeno', source: 'existing', channelId: 'C1', messageId: 'https://discord.com/channels/G1/C1/12345678901234567', entries: [{ emoji: '🎮', roleId: 'R_A' }] });
+    assert.equal(linked.status, 201);
+    assert.equal(linked.json.panel.messageId, '12345678901234567');
+    assert.equal(linked.json.panel.manageEmbed, false);
+    assert.ok(mock.getMessage('12345678901234567').reactions.cache.get('🎮').me);
+    assert.equal((await call('POST', '/api/reactions', { name: 'Ajeno', source: 'existing', channelId: 'C1', messageId: '12345678901234567', entries: [{ emoji: '🎮', roleId: 'R_A' }] })).status, 400);
+    assert.equal((await call('POST', '/api/reactions', { name: 'Ajeno', source: 'existing', channelId: 'C1', messageId: '99999999999999999', entries: [{ emoji: '🎮', roleId: 'R_A' }] })).status, 400);
+    ok('usar un mensaje que ya existe (por enlace o ID)');
+
+    assert.equal((await call('DELETE', `/api/reactions/${ex.id}?message=1`)).status, 200);
+    assert.ok(mock.deletedMessages.includes(ex.messageId));
+    assert.ok(has('U3', 'R_BLUE'), 'borrar no quita roles');
+    await call('POST', '/api/modules/reactions/enabled', { enabled: false });
+    await react('M_OLD', '📰', 'U3');
+    assert.ok(!has('U3', 'R_NEWS'));
+    assert.equal((await call('POST', `/api/reactions/${P.id}/sync`)).status, 409);
+    await call('POST', '/api/modules/reactions/enabled', { enabled: true });
+    await react('M_OLD', '📰', 'U3');
+    assert.ok(has('U3', 'R_NEWS'));
+    ok('eliminar mensaje y desactivar el módulo en caliente');
+
     console.log('\nMódulos en caliente');
     await call('POST', '/api/modules/messages/enabled', { enabled: false });
     assert.equal((await call('POST', '/api/messages/send', { target: { type: 'user', id: 'U1' }, payload: { content: 'x' } })).status, 409);
@@ -410,7 +540,7 @@ async function main() {
     ok('desactivar/activar la bandeja quita y pone el listener al instante');
 
     const st = (await call('GET', '/api/status')).json;
-    assert.equal(st.modules.length, 5);
+    assert.equal(st.modules.length, 6);
     assert.ok(st.stats.sent24h > 5);
     ok('estado general');
 
