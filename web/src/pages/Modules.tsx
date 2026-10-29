@@ -9,6 +9,9 @@ const HELP: Record<string, string> = {
     scheduler: 'Al desactivarlo, las tareas programadas quedan en pausa (no se pierden).',
     confirmations: 'Al desactivarlo, los botones de los formularios dejan de responder y se pausa el contador.',
     servers: 'Al desactivarlo, se deja de consultar los servidores y el mensaje de estado en Discord se queda congelado.',
+    reactions: 'Al desactivarlo, reaccionar deja de dar o quitar roles. Nadie pierde los roles que ya tiene.',
+    welcome: 'Al desactivarlo, no se envía nada al entrar o salir ni se dan roles automáticos.',
+    moderation: 'Al desactivarlo, se deja de publicar en el canal de registro y no se pueden sancionar desde el panel. El historial se sigue viendo.',
 };
 
 export default function Modules() {

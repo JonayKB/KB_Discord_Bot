@@ -9,6 +9,8 @@ import { ChannelType, Collection } from 'discord.js';
 export function createMockDiscord(guildId = 'G1') {
     const sent: Array<{ to: string; opts: any }> = [];
     const roleLog: string[] = [];
+    const modLog: string[] = [];
+    const bans = new Map<string, any>();
     const nickLog: string[] = [];
     const channelsSent: any[] = [];
     const counterEdits: any[] = [];
@@ -16,8 +18,8 @@ export function createMockDiscord(guildId = 'G1') {
 
     const mkUser = (id: string, username: string) => {
         const u: any = {
-            id, username, globalName: username.toUpperCase(), bot: false,
-            displayAvatarURL: () => '',
+            id, username, globalName: username.toUpperCase(), bot: false, createdTimestamp: Date.now() - 400 * 86_400_000,
+            displayAvatarURL: () => 'https://cdn.discordapp.com/embed/avatars/0.png',
             send: async (opts: any) => {
                 if (id === 'CLOSED') throw Object.assign(new Error('Cannot send'), { code: 50007 });
                 sent.push({ to: id, opts });
@@ -32,6 +34,11 @@ export function createMockDiscord(guildId = 'G1') {
         const user = users.get(id) ?? mkUser(id, username);
         const m: any = {
             id, user, displayName: user.globalName, nickname: null, manageable: true,
+            moderatable: true, kickable: true, bannable: true, partial: false,
+            joinedTimestamp: Date.now() - 86_400_000, communicationDisabledUntilTimestamp: null,
+            get guild() { return guild; },
+            timeout: async (ms: number | null) => { m.communicationDisabledUntilTimestamp = ms ? Date.now() + ms : null; modLog.push(`timeout:${id}:${ms}`); },
+            kick: async () => { members.delete(id); modLog.push(`kick:${id}`); },
             roles: {
                 cache: new Collection<string, any>(roles.map(r => [r, { id: r }])),
                 add: async (r: any) => { for (const x of [r].flat()) { m.roles.cache.set(x, { id: x }); roleLog.push(`+${id}:${x}`); } },
@@ -63,6 +70,15 @@ export function createMockDiscord(guildId = 'G1') {
         members: { cache: members, fetch: async (id?: string) => (id ? members.get(id) : members) },
         roles: { cache: roles },
         emojis: { cache: emojis },
+        bans: {
+            create: async (id: string, o: any) => { bans.set(id, { user: users.get(id) ?? mkUser(id, `user-${id}`), reason: o?.reason ?? null }); members.delete(id); modLog.push(`ban:${id}`); },
+            remove: async (id: string) => { bans.delete(id); modLog.push(`unban:${id}`); },
+            fetch: async (id?: string) => {
+                if (!id) return new Collection([...bans.entries()]);
+                if (!bans.has(id)) throw Object.assign(new Error('Unknown Ban'), { code: 10026 });
+                return bans.get(id);
+            },
+        },
         channels: {
             cache: channels,
             fetch: async (id: string) => channels.get(id)
@@ -153,7 +169,7 @@ export function createMockDiscord(guildId = 'G1') {
     });
 
     return {
-        client, guild, members, roles, channels, users, sent, roleLog, nickLog, channelsSent, counterEdits, reactLog, deletedMessages,
+        client, guild, members, roles, channels, users, sent, roleLog, nickLog, channelsSent, counterEdits, reactLog, deletedMessages, modLog, bans,
         mkUser, addMember, addRole, addChannel, addEmoji, getMessage, userReact,
     };
 }

@@ -11,6 +11,8 @@ import Scheduler from './pages/Scheduler';
 import Confirmations from './pages/Confirmations';
 import Servers from './pages/Servers';
 import Reactions from './pages/Reactions';
+import Welcome from './pages/Welcome';
+import Moderation from './pages/Moderation';
 import Modules from './pages/Modules';
 import Logs from './pages/Logs';
 
@@ -25,6 +27,8 @@ const NAV = [
     ['confirmations', 'Confirmaciones', 'check'],
     ['servers', 'Servidores', 'server'],
     ['reactions', 'Roles por reacción', 'smile'],
+    ['welcome', 'Bienvenida', 'wave'],
+    ['moderation', 'Moderación', 'shield'],
     ['modules', 'Módulos', 'grid'],
     ['logs', 'Registros', 'terminal'],
 ] as const;
@@ -111,6 +115,8 @@ export default function App() {
                     {page === 'confirmations' && <Confirmations />}
                     {page === 'servers' && <Servers />}
                     {page === 'reactions' && <Reactions />}
+                    {page === 'welcome' && <Welcome />}
+                    {page === 'moderation' && <Moderation />}
                     {page === 'modules' && <Modules />}
                     {page === 'logs' && <Logs />}
                     {!NAV.some(n => n[0] === page) && <Dashboard />}

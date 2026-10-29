@@ -53,6 +53,8 @@ async function main() {
     const { createSchedulerModule } = await import(src('modules/scheduler'));
     const { ServersService, createServersModule } = await import(src('modules/servers'));
     const { ReactionRolesService, createReactionsModule } = await import(src('modules/reactions'));
+    const { WelcomeService, createWelcomeModule } = await import(src('modules/welcome'));
+    const { ModerationService, createModerationModule } = await import(src('modules/moderation'));
     const { startFakeMinecraft, startFakeSpark } = await import('./fake-game-servers');
     const { startWebServer } = await import(src('web/server'));
     const { migrateLegacy } = await import(src('core/migrateLegacy'));
@@ -89,6 +91,8 @@ async function main() {
     manager.register(createConfirmationsModule(confirmations));
     manager.register(createServersModule(servers));
     manager.register(createReactionsModule(reactions));
+    manager.register(createWelcomeModule(new WelcomeService(mock.client, db, messages)));
+    manager.register(createModerationModule(new ModerationService(mock.client, db, messages)));
     migrateLegacy(db);
 
     // Servidores de juego de ejemplo: un Minecraft falso (con métricas Spark) y uno apagado.
@@ -98,6 +102,24 @@ async function main() {
     addServer.run('MCKB Survival', 'minecraft', 38250, 38251, 'C_GEN', 'M_STATUS', Date.now());
     addServer.run('Hytale MCKB', 'hytale', null, 38252, null, null, Date.now());
     await manager.startEnabled();
+
+    // Historial de ejemplo para las gráficas: 7 días, una muestra cada 5 min, con una caída hace 3 h.
+    const addSample = db.prepare('INSERT INTO server_samples (server_id, ts, online, players, max_players, latency_ms, tps, mspt, cpu) VALUES (1, ?, ?, ?, 20, ?, ?, ?, ?)');
+    db.transaction(() => {
+        const now = Date.now();
+        for (let t = now - 7 * 86_400_000; t < now - 60_000; t += 300_000) {
+            const hour = new Date(t).getHours() + new Date(t).getMinutes() / 60;
+            const down = t > now - 3 * 3600_000 && t < now - 2.6 * 3600_000;
+            const players = Math.max(0, Math.round(9 + 7 * Math.sin(((hour - 15) / 24) * 2 * Math.PI) + (Math.random() * 3 - 1.5)));
+            const lag = Math.random() < 0.03 ? 6 + Math.random() * 5 : Math.random() * 0.8;
+            addSample.run(t, down ? 0 : 1, down ? null : players, down ? null : Math.round(25 + Math.random() * 20),
+                down ? null : 20 - lag, down ? null : 18 + players * 1.4 + lag * 6, down ? null : 0.18 + players / 60 + Math.random() * 0.05);
+        }
+    })();
+    const addCase = db.prepare("INSERT INTO mod_cases (user_id, user_tag, action, reason, duration_ms, moderator_id, moderator_name, source, dm_status, created_at) VALUES (?, ?, ?, ?, ?, 'ADMIN', 'admin', ?, ?, ?)");
+    addCase.run('102', people.find(p => p[0] === '102')![1], 'warn', 'Spam de invitaciones en #general', null, 'panel', 'sent', Date.now() - 5 * 3600_000);
+    addCase.run('102', people.find(p => p[0] === '102')![1], 'timeout', 'Sigue con el spam tras el aviso', 3600_000, 'panel', 'sent', Date.now() - 4 * 3600_000);
+    addCase.run('104', people.find(p => p[0] === '104')![1], 'note', 'Pide whitelist muy a menudo, ojo', null, 'panel', null, Date.now() - 26 * 3600_000);
 
     // Roles por reacción de ejemplo
     mock.addRole('R_UNVER', 'Sin verificar', '#99aab5');

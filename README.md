@@ -13,6 +13,9 @@ Bot de Discord de MCKBServers, ahora **modular** y con un **panel web** para ges
 | Una sola confirmación, y borrar a alguien era editar JSON | Módulo **Confirmaciones**: **varias campañas a la vez** (cada una con su formulario, roles, contador y calendario), borrar/añadir/corregir confirmados desde el panel |
 | Estado de un solo servidor, configurado en el `.env` | Módulo **Servidores de juego**: varios servidores de Minecraft y Hytale, estadísticas en directo en el panel (jugadores, latencia, TPS, MSPT, CPU, versión) y su mensaje de estado en Discord, todo editable sin reiniciar |
 | `/setreaction`: un emoji → un rol, guardado en `config.json` | Módulo **Roles por reacción**: varios emojis y roles por mensaje, cada uno con su comportamiento (normal, permanente, quitar rol, invertido o pulsar), modo exclusivo (un solo rol a la vez), publicar mensajes nuevos o usar uno que ya existe, todo editable desde el panel |
+| Bienvenida por MD escrita en el código | Módulo **Bienvenida**: MD, mensaje en un canal y despedida editables desde el panel (con vista previa y botón de prueba), roles automáticos al entrar |
+| — | Módulo **Moderación**: canal de registro (mensajes borrados/editados, entradas, salidas, roles, apodos, silencios, baneos) y avisar / silenciar / expulsar / banear desde el panel con historial por usuario |
+| Solo el estado actual del servidor de juego | **Estadísticas** de cada servidor: gráficas de jugadores, TPS, MSPT, CPU, latencia y disponibilidad (1 h a 30 días) |
 | Todo mezclado | Cada función es un módulo independiente que se activa/desactiva al instante |
 
 ## Puesta en marcha

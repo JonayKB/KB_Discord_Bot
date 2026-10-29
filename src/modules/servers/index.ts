@@ -68,6 +68,10 @@ export function createServersModule(service: ServersService): BotModule {
         res.json({ ok: true });
     });
 
+    router.get('/:id/history', (req, res) => {
+        res.json(service.history(int(req.params.id, 'id', { min: 1 }), String(req.query.range ?? '24h')));
+    });
+
     router.post('/:id/check', asyncRoute(async (req, res) => {
         res.json(await service.check(int(req.params.id, 'id', { min: 1 })));
     }));

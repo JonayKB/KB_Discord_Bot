@@ -42,6 +42,8 @@ export interface SendMeta {
 /** Opciones extra que no se guardan en el historial (botones, etc.). */
 export interface SendExtras {
     components?: MessageCreateOptions['components'];
+    /** Usuario con el que rellenar {user}, {mention}… al enviar a un canal (p. ej. la bienvenida). */
+    about?: { user?: User; member?: GuildMember };
 }
 
 export type Target =
@@ -167,7 +169,7 @@ export class MessagesService {
             const channel = await this.client.channels.fetch(channelId);
             if (!channel || !('send' in channel)) throw new BotError('Ese canal no admite mensajes.');
             channelName = 'name' in channel ? (channel.name as string) : null;
-            const options = this.buildOptions(payload, {}, extras);
+            const options = this.buildOptions(payload, extras.about ?? {}, extras);
             const sent = await (channel as { send: (o: MessageCreateOptions) => Promise<{ id: string }> }).send(options);
             return this.record({
                 direction: 'out', kind: 'channel', channelId, channelName, discordId: sent.id, payload, meta, status: 'sent',
@@ -370,7 +372,8 @@ export class MessagesService {
             .replaceAll('{user}', display)
             .replaceAll('{username}', ctx.user?.username ?? '')
             .replaceAll('{mention}', ctx.user ? `<@${ctx.user.id}>` : '')
-            .replaceAll('{server}', this.guild()?.name ?? '');
+            .replaceAll('{server}', this.guild()?.name ?? '')
+            .replaceAll('{count}', String(this.guild()?.memberCount ?? ''));
     }
 
     private buildOptions(payload: OutgoingPayload, ctx: { user?: User; member?: GuildMember }, extras: SendExtras): MessageCreateOptions {
