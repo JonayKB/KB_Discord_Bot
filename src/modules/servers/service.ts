@@ -11,6 +11,11 @@ import { queryServer, type PlayerInfo, type QueryResult, type ServerKind } from 
 const logger = new Logger('ServersService');
 
 const INTERVAL_KEY = 'servers.interval_sec';
+/** Días de historial que se guardan para las gráficas. */
+export const HISTORY_DAYS = 30;
+export const HISTORY_RANGES: Record<string, number> = { '1h': 3600_000, '6h': 6 * 3600_000, '24h': 86_400_000, '7d': 7 * 86_400_000, '30d': 30 * 86_400_000 };
+/** Puntos (aprox.) que se devuelven por gráfica, sea cual sea el rango. */
+const HISTORY_POINTS = 150;
 export const MIN_INTERVAL = 10;
 export const MAX_INTERVAL = 3600;
 
@@ -48,6 +53,39 @@ export interface LinkedPlayer extends PlayerInfo {
     /** Usuario de Discord asociado (por la respuesta que dio en una campaña de confirmación). */
     discordId: string | null;
     discordName: string | null;
+}
+
+export interface HistoryPoint {
+    t: number;
+    /** 0..1: fracción del intervalo en la que estuvo online. */
+    up: number;
+    players: number | null;
+    peak: number | null;
+    max: number | null;
+    tps: number | null;
+    tpsMin: number | null;
+    mspt: number | null;
+    cpu: number | null;
+    latency: number | null;
+}
+
+export interface ServerHistory {
+    range: string;
+    from: number;
+    to: number;
+    bucketMs: number;
+    points: HistoryPoint[];
+    summary: {
+        samples: number;
+        uptime: number | null;
+        peakPlayers: number | null;
+        peakAt: number | null;
+        avgPlayers: number | null;
+        avgTps: number | null;
+        minTps: number | null;
+        avgMspt: number | null;
+        avgLatency: number | null;
+    };
 }
 
 export interface ServerStatus extends Omit<QueryResult, 'players'> {
@@ -255,8 +293,76 @@ export class ServersService {
         }
 
         this.statuses.set(id, status);
+        this.recordSample(status);
         publish('servers:status', status);
         return status;
+    }
+
+    // ────────────────────────── Historial (gráficas) ──────────────────────────
+
+    private lastPrune = 0;
+
+    private recordSample(s: ServerStatus): void {
+        try {
+            this.db.prepare(`
+                INSERT INTO server_samples (server_id, ts, online, players, max_players, latency_ms, tps, mspt, cpu)
+                SELECT ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM game_servers WHERE id = ?)
+            `).run(s.serverId, s.checkedAt, s.online ? 1 : 0, s.online ? s.playersOnline : null, s.online ? s.maxPlayers : null,
+                s.latencyMs, s.tps?.m1 ?? null, s.msptMs, s.cpu, s.serverId); // el servidor pudo borrarse mientras se consultaba
+            if (Date.now() - this.lastPrune > 3600_000) {
+                this.lastPrune = Date.now();
+                this.db.prepare('DELETE FROM server_samples WHERE ts < ?').run(Date.now() - HISTORY_DAYS * 86_400_000);
+            }
+        } catch (err) {
+            logger.error('No se pudo guardar el historial del servidor', err);
+        }
+    }
+
+    /** Historial agrupado en ~150 puntos para pintar las gráficas del panel. */
+    history(id: number, range: string): ServerHistory {
+        this.require(id);
+        const span = HISTORY_RANGES[range];
+        if (!span) throw new HttpError(400, `Rango no válido (usa ${Object.keys(HISTORY_RANGES).join(', ')})`);
+        const to = Date.now();
+        const from = to - span;
+        const bucketMs = Math.max(this.intervalSec() * 1000, Math.ceil(span / HISTORY_POINTS / 1000) * 1000);
+        const r1 = (v: number | null) => (v === null ? null : Math.round(v * 10) / 10);
+
+        const rows = this.db.prepare(`
+            SELECT (ts / @b) * @b AS t,
+                   AVG(online) AS up,
+                   AVG(players) AS players, MAX(players) AS peak, MAX(max_players) AS max,
+                   AVG(tps) AS tps, MIN(tps) AS tpsMin, AVG(mspt) AS mspt, AVG(cpu) AS cpu, AVG(latency_ms) AS latency
+            FROM server_samples WHERE server_id = @id AND ts >= @from
+            GROUP BY ts / @b ORDER BY t
+        `).all({ id, from, b: bucketMs }) as HistoryPoint[];
+
+        const sum = this.db.prepare(`
+            SELECT COUNT(*) AS samples, AVG(online) AS uptime, MAX(players) AS peakPlayers, AVG(players) AS avgPlayers,
+                   AVG(tps) AS avgTps, MIN(tps) AS minTps, AVG(mspt) AS avgMspt, AVG(latency_ms) AS avgLatency
+            FROM server_samples WHERE server_id = ? AND ts >= ?
+        `).get(id, from) as Omit<ServerHistory['summary'], 'peakAt'>;
+        const peak = sum.peakPlayers === null ? undefined
+            : this.db.prepare('SELECT ts FROM server_samples WHERE server_id = ? AND ts >= ? AND players = ? ORDER BY ts DESC LIMIT 1').get(id, from, sum.peakPlayers) as { ts: number } | undefined;
+
+        return {
+            range, from, to, bucketMs,
+            points: rows.map(p => ({
+                t: p.t, up: Math.round(p.up * 1000) / 1000, players: r1(p.players), peak: p.peak, max: p.max,
+                tps: r1(p.tps), tpsMin: r1(p.tpsMin), mspt: r1(p.mspt), cpu: p.cpu === null ? null : Math.round(p.cpu * 1000) / 10, latency: p.latency === null ? null : Math.round(p.latency),
+            })),
+            summary: {
+                samples: sum.samples,
+                uptime: sum.uptime,
+                peakPlayers: sum.peakPlayers,
+                peakAt: peak?.ts ?? null,
+                avgPlayers: r1(sum.avgPlayers),
+                avgTps: r1(sum.avgTps),
+                minTps: r1(sum.minTps),
+                avgMspt: r1(sum.avgMspt),
+                avgLatency: sum.avgLatency === null ? null : Math.round(sum.avgLatency),
+            },
+        };
     }
 
     private linkPlayer(server: GameServer, p: PlayerInfo): LinkedPlayer {

@@ -52,6 +52,8 @@ async function main() {
     const { createSchedulerModule } = await import(src('modules/scheduler'));
     const { ServersService, createServersModule } = await import(src('modules/servers'));
     const { ReactionRolesService, createReactionsModule } = await import(src('modules/reactions'));
+    const { WelcomeService, createWelcomeModule } = await import(src('modules/welcome'));
+    const { ModerationService, createModerationModule } = await import(src('modules/moderation'));
     const { startFakeMinecraft, startFakeSpark } = await import('./fake-game-servers');
     const { startWebServer } = await import(src('web/server'));
     const { migrateLegacy, migrateReactions, migrateServers } = await import(src('core/migrateLegacy'));
@@ -73,6 +75,7 @@ async function main() {
     mock.addChannel('C_COUNT', 'contador');
     for (const [id, name] of [['R_PING', 'Avisos'], ['R_NEWS', 'Noticias'], ['R_A', 'A'], ['R_VER', 'Verificado'], ['R_UNVER', 'Sin verificar'], ['R_B', 'B'], ['R_C', 'C'], ['R_RED', 'Rojo'], ['R_BLUE', 'Azul']]) mock.addRole(id, name);
     mock.addEmoji('111111111111111111', 'kbheart');
+    mock.addChannel('C_LOG', 'registro');
 
     // ── Servicios (igual que index.ts) ──
     const db = openDb();
@@ -83,6 +86,8 @@ async function main() {
     const scheduler = new SchedulerService(db, messages, confirmations);
     const gameServers = new ServersService(client, db, confirmations);
     const reactions = new ReactionRolesService(client, db);
+    const welcome = new WelcomeService(client, db, messages);
+    const moderation = new ModerationService(client, db, messages);
     setServices({ messages, confirmations, servers: gameServers, reactions });
     manager.register(createMessagesModule(messages, db));
     manager.register(createInboxModule(inbox, messages, db));
@@ -90,6 +95,8 @@ async function main() {
     manager.register(createConfirmationsModule(confirmations));
     manager.register(createServersModule(gameServers));
     manager.register(createReactionsModule(reactions));
+    manager.register(createWelcomeModule(welcome));
+    manager.register(createModerationModule(moderation));
     const fakeMc = startFakeMinecraft(38200, { online: 2, max: 20, players: ['Steve', 'Alex'], version: 'Paper 1.21.1', motd: 'MCKB Survival' });
     const fakeSpark = startFakeSpark(38201);
     migrateLegacy(db);
@@ -520,6 +527,122 @@ async function main() {
     assert.ok(has('U3', 'R_NEWS'));
     ok('eliminar mensaje y desactivar el módulo en caliente');
 
+    console.log('\nHistorial de servidores (gráficas)');
+    assert.equal((await call('GET', `/api/servers/${mcId}/history?range=2h`)).status, 400);
+    const srvHist = (await call('GET', `/api/servers/${mcId}/history?range=1h`)).json;
+    assert.ok(srvHist.points.length >= 1, 'cada consulta deja una muestra');
+    assert.equal(srvHist.summary.peakPlayers, 2);
+    assert.equal(srvHist.summary.uptime, 1);
+    assert.ok(srvHist.points[0].tps > 0 && srvHist.points[0].players === 2);
+    assert.ok(srvHist.bucketMs >= 1000);
+    ok('las consultas se guardan y se agrupan por rango (jugadores, TPS, uptime)');
+
+    console.log('\nBienvenida');
+    const wcfg = (await call('GET', '/api/welcome')).json;
+    assert.equal(wcfg.dm.enabled, true);
+    assert.equal(wcfg.dm.payload.embed.title, '✨ ¡Bienvenido!', 'por defecto, la bienvenida de siempre');
+    assert.equal((await call('PUT', '/api/welcome', { ...wcfg, channel: { ...wcfg.channel, enabled: true, channelId: null } })).status, 400);
+    const saved = await call('PUT', '/api/welcome', {
+        ...wcfg,
+        channel: { enabled: true, channelId: 'C1', payload: { content: 'Hola {mention}, somos {count}' } },
+        goodbye: { enabled: true, channelId: 'C1', payload: { content: 'Adiós {username}' } },
+        autoRoleIds: ['R_A'],
+    });
+    assert.equal(saved.status, 200, JSON.stringify(saved.json));
+    const joiner = mock.addMember('U9', 'nuevo_dc');
+    const sentW = sent.length;
+    client.emit('guildMemberAdd', joiner);
+    await sleep(200);
+    assert.ok(sent.slice(sentW).some((m: any) => m.to === 'U9' && m.opts.embeds?.[0]?.data?.title === '✨ ¡Bienvenido!'), 'MD de bienvenida');
+    assert.ok(channelsSent.some((o: any) => o.content === `Hola <@U9>, somos ${members.size}`), 'mensaje en el canal con {mention} y {count}');
+    assert.ok(joiner.roles.cache.has('R_A'), 'rol automático');
+    members.delete('U9');
+    client.emit('guildMemberRemove', joiner);
+    await sleep(100);
+    assert.ok(channelsSent.some((o: any) => o.content === 'Adiós nuevo_dc'));
+    ok('MD + mensaje en canal + rol automático al entrar, y despedida al salir');
+    assert.equal((await call('POST', '/api/welcome/test', { kind: 'dm', config: saved.json })).status, 400, 'el usuario del panel no está en el servidor');
+    ok('probar el mensaje exige estar en el servidor');
+
+    console.log('\nModeración');
+    const TROLL = '20000000000000001';
+    const troll = mock.addMember(TROLL, 'troll_dc');
+    const mcfg = (await call('GET', '/api/moderation/config')).json;
+    assert.equal((await call('PUT', '/api/moderation/config', { ...mcfg, logChannelId: 'C_LOG', ignoreChannelIds: ['C_COUNT'] })).json.logChannelId, 'C_LOG');
+    const lastLog = () => channelsSent.at(-1)?.embeds?.[0]?.data;
+
+    assert.equal((await call('POST', '/api/moderation/actions', { action: 'warn', userId: TROLL, reason: '' })).status, 400);
+    assert.equal((await call('POST', '/api/moderation/actions', { action: 'warn', userId: 'U1', reason: 'x' })).status, 400);
+    const warn = await call('POST', '/api/moderation/actions', { action: 'warn', userId: TROLL, reason: 'Spam en #general' });
+    assert.equal(warn.status, 201);
+    assert.equal(warn.json.dmStatus, 'sent');
+    assert.equal(warn.json.moderatorName, 'Desarrollo');
+    assert.ok(sent.some((m: any) => m.to === TROLL && /aviso/.test(m.opts.embeds?.[0]?.data?.title ?? '')), 'se avisa por MD');
+    await sleep(50);
+    assert.match(lastLog()?.title ?? '', /Aviso · caso #/);
+    ok('avisar: motivo obligatorio, MD al usuario y publicado en el registro');
+
+    const to = await call('POST', '/api/moderation/actions', { action: 'timeout', userId: TROLL, reason: 'Calma', durationMs: 600_000 });
+    assert.equal(to.status, 201);
+    assert.ok(mock.modLog.includes(`timeout:${TROLL}:600000`));
+    const trollBefore = { ...troll, partial: false, communicationDisabledUntilTimestamp: null, roles: troll.roles, nickname: null };
+    client.emit('guildMemberUpdate', trollBefore, troll);
+    await sleep(50);
+    assert.equal((await call('GET', `/api/moderation/cases?userId=${TROLL}&action=timeout`)).json.length, 1, 'el evento de Discord no duplica el caso');
+    assert.equal((await call('POST', '/api/moderation/actions', { action: 'timeout', userId: TROLL, reason: 'x', durationMs: 1000 })).status, 400);
+    ok('silenciar con duración (sin duplicar el caso)');
+
+    const manual = mock.addMember('20000000000000002', 'otro_dc');
+    const manualBefore = { ...manual, partial: false, roles: manual.roles };
+    manual.communicationDisabledUntilTimestamp = Date.now() + 3600_000;
+    client.emit('guildMemberUpdate', manualBefore, manual);
+    await sleep(50);
+    const manualCases = (await call('GET', '/api/moderation/cases?userId=20000000000000002')).json;
+    assert.equal(manualCases.length, 1);
+    assert.equal(manualCases[0].source, 'discord');
+    ok('un silencio hecho a mano en Discord también queda en el historial');
+
+    troll.kickable = false;
+    assert.equal((await call('POST', '/api/moderation/actions', { action: 'kick', userId: TROLL, reason: 'x' })).status, 400);
+    troll.kickable = true;
+    const ban = await call('POST', '/api/moderation/actions', { action: 'ban', userId: TROLL, reason: 'Reincidente', deleteDays: 1 });
+    assert.equal(ban.status, 201);
+    assert.ok(mock.bans.has(TROLL) && !members.has(TROLL));
+    assert.equal((await call('GET', '/api/moderation/bans')).json[0].userId, TROLL);
+    client.emit('guildBanAdd', { user: troll.user, reason: 'x' });
+    await sleep(50);
+    assert.equal((await call('GET', `/api/moderation/cases?userId=${TROLL}&action=ban`)).json.length, 1, 'sin duplicar');
+    assert.equal((await call('POST', '/api/moderation/actions', { action: 'unban', userId: TROLL, reason: '' })).status, 201);
+    assert.equal((await call('POST', '/api/moderation/actions', { action: 'unban', userId: TROLL, reason: '' })).status, 400, 'ya no está baneado');
+    const summary = (await call('GET', `/api/moderation/users/${TROLL}`)).json;
+    assert.deepEqual(summary.counts, { warn: 1, timeout: 1, ban: 1, unban: 1 });
+    ok('expulsar (comprueba permisos), banear, lista de baneos, desbanear e historial por usuario');
+
+    const fakeMsg = (channelId: string, content: string) => ({ guildId: 'G1', channelId, partial: false, content, author: { id: 'U1', username: 'steve_dc', bot: false }, attachments: new Collection(), url: 'https://discord.com/x' });
+    const n0 = channelsSent.length;
+    client.emit('messageDelete', fakeMsg('C1', 'mensaje malo'));
+    await sleep(50);
+    assert.equal(lastLog()?.title, '🗑️ Mensaje borrado');
+    assert.ok(lastLog().fields.some((f: any) => f.value === 'mensaje malo'));
+    client.emit('messageDelete', fakeMsg('C_COUNT', 'ignorado'));
+    client.emit('messageUpdate', fakeMsg('C1', 'igual'), fakeMsg('C1', 'igual'));
+    await sleep(50);
+    assert.equal(channelsSent.length, n0 + 1, 'canal ignorado y ediciones sin cambio de texto no se registran');
+    client.emit('messageUpdate', fakeMsg('C1', 'antes'), fakeMsg('C1', 'después'));
+    await sleep(50);
+    assert.equal(lastLog()?.title, '✏️ Mensaje editado');
+    ok('registro de mensajes borrados y editados');
+
+    assert.equal((await call('DELETE', `/api/moderation/cases/${warn.json.id}`)).status, 200);
+    await call('POST', '/api/modules/moderation/enabled', { enabled: false });
+    const n1 = channelsSent.length;
+    client.emit('messageDelete', fakeMsg('C1', 'nada'));
+    await sleep(50);
+    assert.equal(channelsSent.length, n1);
+    assert.equal((await call('POST', '/api/moderation/actions', { action: 'warn', userId: '20000000000000002', reason: 'x' })).status, 409);
+    await call('POST', '/api/modules/moderation/enabled', { enabled: true });
+    ok('borrar un caso y desactivar el módulo en caliente');
+
     console.log('\nMódulos en caliente');
     await call('POST', '/api/modules/messages/enabled', { enabled: false });
     assert.equal((await call('POST', '/api/messages/send', { target: { type: 'user', id: 'U1' }, payload: { content: 'x' } })).status, 409);
@@ -540,7 +663,7 @@ async function main() {
     ok('desactivar/activar la bandeja quita y pone el listener al instante');
 
     const st = (await call('GET', '/api/status')).json;
-    assert.equal(st.modules.length, 6);
+    assert.equal(st.modules.length, 8);
     assert.ok(st.stats.sent24h > 5);
     ok('estado general');
 

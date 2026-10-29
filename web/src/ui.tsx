@@ -25,6 +25,9 @@ const PATHS: Record<string, ReactNode> = {
     back: <><path d="M15 18l-6-6 6-6" /></>,
     logout: <><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" /><path d="M16 17l5-5-5-5M21 12H9" /></>,
     search: <><circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" /></>,
+    chart: <><path d="M3 3v18h18" /><path d="M7 15l4-4 3 3 5-6" /></>,
+    shield: <><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></>,
+    wave: <><path d="M7 11V6a2 2 0 014 0v5" /><path d="M11 10V4a2 2 0 014 0v6" /><path d="M15 10V6a2 2 0 014 0v8a7 7 0 01-7 7h-1a7 7 0 01-6-3.5L3 14a2 2 0 013.4-2L8 14" /></>,
     smile: <><circle cx="12" cy="12" r="10" /><path d="M8 14s1.5 2 4 2 4-2 4-2" /><path d="M9 9h.01M15 9h.01" /></>,
     server: <><rect x="2" y="3" width="20" height="8" rx="2" /><rect x="2" y="13" width="20" height="8" rx="2" /><path d="M6 7h.01M6 17h.01" /></>,
     settings: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09a1.65 1.65 0 001.51-1 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33h0a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51h0a1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82v0a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z" /></>,
@@ -326,6 +329,24 @@ export function ChannelSelect({ value, onChange, channels }: { value: string; on
     );
 }
 
+export function RoleChecklist({ label, hint, roles, value, onChange }: {
+    label: string; hint?: string; roles: Role[]; value: string[]; onChange: (v: string[]) => void;
+}) {
+    const toggle = (id: string) => onChange(value.includes(id) ? value.filter(x => x !== id) : [...value, id]);
+    return (
+        <div className="field">
+            <span>{label}</span>
+            <div className="card" style={{ background: 'var(--panel-2)', padding: 10, maxHeight: 150, overflowY: 'auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(180px,1fr))', gap: 6 }}>
+                {roles.filter(r => !r.managed).map(r => (
+                    <label key={r.id} className="check" style={{ fontWeight: 450 }}><input type="checkbox" checked={value.includes(r.id)} onChange={() => toggle(r.id)} /> {r.name} <span className="muted small">({r.members})</span></label>
+                ))}
+                {roles.length === 0 && <span className="hint">Cargando roles…</span>}
+            </div>
+            {hint && <span className="hint">{hint}</span>}
+        </div>
+    );
+}
+
 // ───────────────────────────── Selector de destinatario ─────────────────────────────
 
 export function TargetPicker({ value, onChange, allowChannel = true, memberCount }: {
@@ -400,7 +421,7 @@ export function EmbedFields({ value, onChange }: { value: EmbedData; onChange: (
 }
 
 export const VARIABLES: Array<[string, string]> = [
-    ['{user}', 'Nombre visible'], ['{username}', 'Usuario'], ['{mention}', 'Mención'], ['{server}', 'Servidor'],
+    ['{user}', 'Nombre visible'], ['{username}', 'Usuario'], ['{mention}', 'Mención'], ['{server}', 'Servidor'], ['{count}', 'Nº de miembros'],
 ];
 
 export function VariableChips({ onInsert }: { onInsert: (v: string) => void }) {
@@ -417,7 +438,7 @@ export function VariableChips({ onInsert }: { onInsert: (v: string) => void }) {
 export function DiscordPreview({ botName, botAvatar, content, embed, files }: {
     botName: string; botAvatar?: string | null; content: string; embed: EmbedData | null; files: FileInfo[];
 }) {
-    const sample = (s: string) => s.replaceAll('{user}', 'Alex').replaceAll('{username}', 'alex_01').replaceAll('{mention}', '@Alex').replaceAll('{server}', 'Tu servidor');
+    const sample = (s: string) => s.replaceAll('{user}', 'Alex').replaceAll('{username}', 'alex_01').replaceAll('{mention}', '@Alex').replaceAll('{server}', 'Tu servidor').replaceAll('{count}', '128');
     return (
         <div className="dc">
             <div className="dc-head"><Avatar src={botAvatar} name={botName} size="lg" /><div><b>{botName}</b> <small>BOT · hoy</small></div></div>

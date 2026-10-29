@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { del, get, post, put, type GameServer, type ModuleInfo, type ServerKind, type ServerStatus } from '../api';
+import { del, get, post, put, type GameServer, type ModuleInfo, type ServerHistory, type ServerKind, type ServerStatus } from '../api';
+import { TimeChart, UptimeStrip, fmtTipTime } from '../charts';
 import { fmtDateTime, fmtRelative } from '../format';
 import { useLive } from '../live';
 import { Check, ChannelSelect, Empty, Icon, Modal, PageHead, Spinner, Switch, errMsg, toast, useConfirm, useGuildData } from '../ui';
@@ -113,6 +114,7 @@ function ServerCard({ server: s, busy, running, channelName, onCheck, onEdit, on
     onCheck: () => void; onEdit: () => void; onDelete: () => void; onToggle: (v: boolean) => void; onMessage: () => void; onUnlink: () => void;
 }) {
     const st = s.status;
+    const [showStats, setShowStats] = useState(false);
     const state = !s.enabled ? 'paused' : !st ? 'unknown' : st.online ? 'online' : 'offline';
     const fill = st && st.maxPlayers > 0 ? Math.min(st.playersOnline / st.maxPlayers, 1) : 0;
 
@@ -128,6 +130,7 @@ function ServerCard({ server: s, busy, running, channelName, onCheck, onEdit, on
                 <div className="row wrap">
                     <label className="row small muted">Activo <Switch checked={s.enabled} disabled={!running} onChange={onToggle} label="Consultar este servidor" /></label>
                     <button className="btn sm" disabled={!running || !s.enabled || busy} onClick={onCheck}><Icon name="refresh" size={14} /> {busy ? 'Consultando…' : 'Comprobar'}</button>
+                    <button className={`btn sm ${showStats ? 'primary' : ''}`} onClick={() => setShowStats(v => !v)} aria-expanded={showStats}><Icon name="chart" size={14} /> Estadísticas</button>
                     <button className="btn sm" disabled={!running} onClick={onEdit}><Icon name="edit" size={14} /> Editar</button>
                     <button className="btn sm danger" disabled={!running} onClick={onDelete} aria-label="Eliminar servidor"><Icon name="trash" size={14} /></button>
                 </div>
@@ -199,6 +202,8 @@ function ServerCard({ server: s, busy, running, channelName, onCheck, onEdit, on
                 </>
             )}
 
+            {showStats && <><div className="sep" /><ServerStats server={s} /></>}
+
             <div className="sep" />
             <div className="row between wrap">
                 <div>
@@ -215,6 +220,98 @@ function ServerCard({ server: s, busy, running, channelName, onCheck, onEdit, on
                 </div>
             </div>
             {st?.messageError && <div className="alert danger">No se pudo actualizar el mensaje: {st.messageError}</div>}
+        </div>
+    );
+}
+
+// ───────────────────────────── Estadísticas ─────────────────────────────
+
+const RANGES: Array<[string, string]> = [['1h', '1 hora'], ['6h', '6 horas'], ['24h', '24 horas'], ['7d', '7 días'], ['30d', '30 días']];
+const num = (v: number | null, d = 0, unit = '') => (v === null ? '—' : `${v.toLocaleString('es-ES', { maximumFractionDigits: d })}${unit}`);
+
+function ServerStats({ server }: { server: GameServer }) {
+    const [range, setRange] = useState('24h');
+    const [data, setData] = useState<ServerHistory | null>(null);
+    const [loading, setLoading] = useState(false);
+    const [hover, setHover] = useState<number | null>(null);
+    const [table, setTable] = useState(false);
+
+    const load = useCallback(() => {
+        setLoading(true);
+        get<ServerHistory>(`/servers/${server.id}/history?range=${range}`)
+            .then(setData).catch(e => toast.error(errMsg(e))).finally(() => setLoading(false));
+    }, [server.id, range]);
+    useEffect(load, [load]);
+    // Se refresca solo mientras está abierto.
+    useEffect(() => { const t = setInterval(load, 60_000); return () => clearInterval(t); }, [load]);
+
+    const pts = data?.points ?? [];
+    const sum = data?.summary;
+    const gap = (data?.bucketMs ?? 60_000) * 2.5;
+    const hasTps = pts.some(p => p.tps !== null);
+    const hasMspt = pts.some(p => p.mspt !== null);
+    const hasCpu = pts.some(p => p.cpu !== null);
+    const maxPlayers = pts.reduce((m, p) => Math.max(m, p.max ?? 0), 0);
+    const common = { from: data?.from ?? 0, to: data?.to ?? 0, gapMs: gap, hover, onHover: setHover };
+
+    return (
+        <div className="stack">
+            <div className="row between wrap">
+                <div className="seg" role="group" aria-label="Rango de tiempo">
+                    {RANGES.map(([v, l]) => <button key={v} type="button" className={range === v ? 'on' : ''} onClick={() => setRange(v)}>{l}</button>)}
+                </div>
+                <button className="btn sm ghost" onClick={() => setTable(t => !t)}>{table ? 'Ver gráficas' : 'Ver como tabla'}</button>
+            </div>
+
+            {!data ? <Spinner /> : sum!.samples === 0 ? (
+                <div className="muted small">Aún no hay datos en este rango. Se guarda una muestra con cada consulta (los últimos 30 días).</div>
+            ) : (
+                <>
+                    <div className="grid tiles">
+                        <div className="tile"><div className="label">Disponibilidad</div><div className="value" style={{ color: (sum!.uptime ?? 0) >= 0.99 ? 'var(--ok)' : (sum!.uptime ?? 0) >= 0.9 ? 'var(--warn)' : 'var(--danger)' }}>{num(sum!.uptime === null ? null : sum!.uptime * 100, 1, '%')}</div></div>
+                        <div className="tile"><div className="label">Pico de jugadores</div><div className="value">{num(sum!.peakPlayers)}</div><div className="muted small">{sum!.peakAt ? fmtTipTime(sum!.peakAt) : ' '}</div></div>
+                        <div className="tile"><div className="label">Media de jugadores</div><div className="value">{num(sum!.avgPlayers, 1)}</div></div>
+                        {sum!.avgTps !== null && <div className="tile"><div className="label">TPS medio</div><div className="value">{num(sum!.avgTps, 1)}</div><div className="muted small">Mínimo {num(sum!.minTps, 1)}</div></div>}
+                        {sum!.avgMspt !== null && <div className="tile"><div className="label">MSPT medio</div><div className="value">{num(sum!.avgMspt, 1, ' ms')}</div></div>}
+                        <div className="tile"><div className="label">Latencia media</div><div className="value">{num(sum!.avgLatency, 0, ' ms')}</div></div>
+                    </div>
+
+                    {table ? (
+                        <div className="table-wrap" style={{ maxHeight: 360, overflowY: 'auto' }}>
+                            <table>
+                                <thead><tr><th>Hora</th><th>Estado</th><th>Jugadores (media / pico)</th>{hasTps && <th>TPS</th>}{hasMspt && <th>MSPT</th>}{hasCpu && <th>CPU</th>}<th>Latencia</th></tr></thead>
+                                <tbody>
+                                    {[...pts].reverse().map(p => (
+                                        <tr key={p.t}>
+                                            <td className="small">{fmtTipTime(p.t)}</td>
+                                            <td className="small">{p.up >= 0.999 ? 'Online' : p.up <= 0.001 ? 'Offline' : `Intermitente (${Math.round(p.up * 100)}%)`}</td>
+                                            <td>{num(p.players, 1)} / {num(p.peak)}</td>
+                                            {hasTps && <td>{num(p.tps, 1)}</td>}
+                                            {hasMspt && <td>{num(p.mspt, 1, ' ms')}</td>}
+                                            {hasCpu && <td>{num(p.cpu, 0, '%')}</td>}
+                                            <td>{num(p.latency, 0, ' ms')}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    ) : (
+                        <>
+                            <UptimeStrip points={pts} from={common.from} to={common.to} bucketMs={data.bucketMs} hover={hover} onHover={setHover} />
+                            <div className={`charts ${loading ? 'loading' : ''}`}>
+                                <TimeChart title="Jugadores (media)" points={pts.map(p => ({ t: p.t, v: p.players }))} decimals={1}
+                                    reference={maxPlayers ? { value: maxPlayers, label: `Máx. ${maxPlayers}` } : undefined} {...common} />
+                                {hasTps && <TimeChart title="TPS" points={pts.map(p => ({ t: p.t, v: p.tps }))} yMax={20} decimals={1} {...common} />}
+                                {hasMspt && <TimeChart title="MSPT" points={pts.map(p => ({ t: p.t, v: p.mspt }))} unit=" ms" decimals={1}
+                                    reference={{ value: 50, label: 'Límite 50 ms' }} {...common} />}
+                                {hasCpu && <TimeChart title="CPU" points={pts.map(p => ({ t: p.t, v: p.cpu }))} unit="%" yMax={100} {...common} />}
+                                <TimeChart title="Latencia" points={pts.map(p => ({ t: p.t, v: p.latency }))} unit=" ms" {...common} />
+                            </div>
+                            {server.type === 'minecraft' && !hasTps && <div className="hint">Para ver TPS, MSPT y CPU configura el puerto de métricas (Spark) del servidor.</div>}
+                        </>
+                    )}
+                </>
+            )}
         </div>
     );
 }

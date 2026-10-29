@@ -178,6 +178,35 @@ const MIGRATIONS: string[] = [
     );
     CREATE INDEX idx_reaction_roles_panel ON reaction_roles (panel_id, position);
     `,
+    /* v4: moderación + historial de los servidores de juego */ `
+    CREATE TABLE mod_cases (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id        TEXT NOT NULL,
+        user_tag       TEXT,
+        action         TEXT NOT NULL CHECK (action IN ('warn','note','timeout','untimeout','kick','ban','unban')),
+        reason         TEXT,
+        duration_ms    INTEGER,
+        moderator_id   TEXT,
+        moderator_name TEXT,
+        source         TEXT NOT NULL DEFAULT 'panel',   -- panel | discord (hecho a mano en Discord)
+        dm_status      TEXT,                            -- sent | failed | null (no se avisó)
+        created_at     INTEGER NOT NULL
+    );
+    CREATE INDEX idx_mod_cases_user ON mod_cases (user_id, id);
+
+    CREATE TABLE server_samples (
+        server_id   INTEGER NOT NULL REFERENCES game_servers (id) ON DELETE CASCADE,
+        ts          INTEGER NOT NULL,
+        online      INTEGER NOT NULL,
+        players     INTEGER,
+        max_players INTEGER,
+        latency_ms  INTEGER,
+        tps         REAL,
+        mspt        REAL,
+        cpu         REAL
+    );
+    CREATE INDEX idx_server_samples ON server_samples (server_id, ts);
+    `,
 ];
 
 export function openDb(file = path.join(DATA_DIR, 'bot.db')): DB {

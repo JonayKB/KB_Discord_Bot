@@ -240,3 +240,29 @@ export interface ReactionPanel {
 }
 
 export interface GuildEmoji { id: string; name: string; animated: boolean; value: string; url: string }
+
+export interface HistoryPoint {
+    t: number; up: number; players: number | null; peak: number | null; max: number | null;
+    tps: number | null; tpsMin: number | null; mspt: number | null; cpu: number | null; latency: number | null;
+}
+
+export interface ServerHistory {
+    range: string; from: number; to: number; bucketMs: number; points: HistoryPoint[];
+    summary: {
+        samples: number; uptime: number | null; peakPlayers: number | null; peakAt: number | null; avgPlayers: number | null;
+        avgTps: number | null; minTps: number | null; avgMspt: number | null; avgLatency: number | null;
+    };
+}
+
+export interface WelcomePayload { content?: string; embed?: EmbedData | null; fileIds?: string[] }
+export interface WelcomeMessage { enabled: boolean; channelId?: string | null; payload: WelcomePayload }
+export interface WelcomeConfig { dm: WelcomeMessage; channel: WelcomeMessage; goodbye: WelcomeMessage; autoRoleIds: string[]; ignoreBots: boolean }
+
+export type ModAction = 'warn' | 'note' | 'timeout' | 'untimeout' | 'kick' | 'ban' | 'unban';
+export type LogEvent = 'messageDelete' | 'messageEdit' | 'memberJoin' | 'memberLeave' | 'roles' | 'nicknames' | 'timeouts' | 'bans' | 'modActions';
+export interface ModerationConfig { logChannelId: string | null; log: Record<LogEvent, boolean>; ignoreChannelIds: string[]; dmOnAction: boolean }
+export interface ModCase {
+    id: number; userId: string; userTag: string | null; action: ModAction; reason: string | null; durationMs: number | null;
+    moderatorId: string | null; moderatorName: string | null; source: 'panel' | 'discord'; dmStatus: 'sent' | 'failed' | null; createdAt: number;
+}
+export interface BanInfo { userId: string; username: string; avatar: string; reason: string | null }

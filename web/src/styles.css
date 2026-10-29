@@ -300,3 +300,32 @@ td.shrink, th.shrink { width: 1%; white-space: nowrap; }
 .kbd { font: 11px var(--mono); border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 5px; padding: 0 5px; background: var(--panel-2); }
 .lightbox { position: fixed; inset: 0; background: rgba(0, 0, 0, .86); z-index: 90; display: grid; place-items: center; cursor: zoom-out; padding: 20px; }
 .lightbox img { max-width: 100%; max-height: 100%; border-radius: 8px; }
+
+/* ───── Gráficas ───── */
+.chart { position: relative; min-width: 0; }
+.chart-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 4px; font-size: 13px; }
+.chart-now { color: var(--text); font-variant-numeric: tabular-nums; }
+.chart svg { display: block; overflow: visible; touch-action: pan-y; }
+.chart svg:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+.chart-empty { height: 150px; display: grid; place-items: center; border: 1px dashed var(--border); border-radius: 8px; }
+.chart-grid { stroke: var(--border); stroke-width: 1; }
+.chart-ref { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 4 4; }
+.chart-tick { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.chart-line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart-area { fill: var(--accent); opacity: .14; }
+.chart-dot { fill: var(--accent); stroke: var(--panel); stroke-width: 2; }
+.chart-cross { stroke: var(--muted); stroke-width: 1; }
+.chart-tip { position: absolute; top: 24px; transform: translateX(-50%); pointer-events: none; background: var(--panel-3); border: 1px solid var(--border); border-radius: 8px; padding: 5px 9px; box-shadow: var(--shadow); display: flex; flex-direction: column; font-size: 12px; white-space: nowrap; z-index: 2; }
+.chart-tip b { font-size: 14px; font-variant-numeric: tabular-nums; }
+.chart-tip span { color: var(--muted); }
+.charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 22px; }
+@media (max-width: 860px) { .charts { grid-template-columns: 1fr; } }
+.charts.loading { opacity: .55; transition: opacity .15s; }
+.uptime-bg { fill: var(--panel-3); }
+.uptime-ok { fill: var(--ok); }
+.uptime-down { fill: var(--danger); }
+.uptime-partial { fill: var(--warn); }
+.uptime-key { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.uptime-key.ok { background: var(--ok); }
+.uptime-key.down { background: var(--danger); }
+.uptime-key.partial { background: var(--warn); }

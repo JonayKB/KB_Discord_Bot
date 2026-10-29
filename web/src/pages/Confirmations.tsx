@@ -3,7 +3,7 @@ import { del, get, post, put, type Campaign, type Entry, type Member } from '../
 import { fmtDateTime, fmtRelative } from '../format';
 import { useLive } from '../live';
 import {
-    Avatar, Check, ChannelSelect, Empty, Icon, Modal, PageHead, RoleSelect, Spinner, Switch, UserPicker,
+    Avatar, Check, ChannelSelect, Empty, Icon, Modal, PageHead, RoleChecklist, RoleSelect, Spinner, Switch, UserPicker,
     errMsg, toast, useConfirm, useGuildData,
 } from '../ui';
 
@@ -296,24 +296,6 @@ function CampaignEditor({ initial, guild, onClose, onSaved }: {
                 <label className="field">Título del mensaje contador<input type="text" maxLength={256} value={d.counterTitle} onChange={e => set({ counterTitle: e.target.value })} /></label>
             </div>
         </Modal>
-    );
-}
-
-function RoleChecklist({ label, hint, roles, value, onChange }: {
-    label: string; hint?: string; roles: ReturnType<typeof useGuildData>['roles']; value: string[]; onChange: (v: string[]) => void;
-}) {
-    const toggle = (id: string) => onChange(value.includes(id) ? value.filter(x => x !== id) : [...value, id]);
-    return (
-        <div className="field">
-            <span>{label}</span>
-            <div className="card" style={{ background: 'var(--panel-2)', padding: 10, maxHeight: 150, overflowY: 'auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(180px,1fr))', gap: 6 }}>
-                {roles.filter(r => !r.managed).map(r => (
-                    <label key={r.id} className="check" style={{ fontWeight: 450 }}><input type="checkbox" checked={value.includes(r.id)} onChange={() => toggle(r.id)} /> {r.name} <span className="muted small">({r.members})</span></label>
-                ))}
-                {roles.length === 0 && <span className="hint">Cargando roles…</span>}
-            </div>
-            {hint && <span className="hint">{hint}</span>}
-        </div>
     );
 }
 

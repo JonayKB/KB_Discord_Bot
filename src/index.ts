@@ -22,6 +22,8 @@ import { SchedulerService } from "./modules/scheduler/service";
 import { createSchedulerModule } from "./modules/scheduler";
 import { ServersService, createServersModule } from "./modules/servers";
 import { ReactionRolesService, createReactionsModule } from "./modules/reactions";
+import { WelcomeService, createWelcomeModule } from "./modules/welcome";
+import { ModerationService, createModerationModule } from "./modules/moderation";
 
 startLogCapture();
 const logger = new Logger("Index");
@@ -36,6 +38,7 @@ const client = new Client({
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.GuildMembers,
+        GatewayIntentBits.GuildModeration,
         GatewayIntentBits.GuildMessageReactions,
         GatewayIntentBits.DirectMessages,
         GatewayIntentBits.GuildPresences
@@ -67,6 +70,8 @@ const inbox = new InboxService(db, messages);
 const scheduler = new SchedulerService(db, messages, confirmations);
 const servers = new ServersService(client, db, confirmations);
 const reactions = new ReactionRolesService(client, db);
+const welcome = new WelcomeService(client, db, messages);
+const moderation = new ModerationService(client, db, messages);
 setServices({ messages, confirmations, servers, reactions });
 
 manager.register(createMessagesModule(messages, db));
@@ -75,8 +80,10 @@ manager.register(createSchedulerModule(scheduler));
 manager.register(createConfirmationsModule(confirmations));
 manager.register(createServersModule(servers));
 manager.register(createReactionsModule(reactions));
+manager.register(createWelcomeModule(welcome));
+manager.register(createModerationModule(moderation));
 
-// ───────────── Código "clásico" (comandos y bienvenida) ─────────────
+// ───────────── Código "clásico" (comandos) ─────────────
 loadCommands(client);
 loadEvents(client);
 
