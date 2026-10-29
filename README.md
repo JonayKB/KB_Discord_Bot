@@ -16,6 +16,7 @@ Bot de Discord de MCKBServers, ahora **modular** y con un **panel web** para ges
 | Bienvenida por MD escrita en el código | Módulo **Bienvenida**: MD, mensaje en un canal y despedida editables desde el panel (con vista previa y botón de prueba), roles automáticos al entrar |
 | — | Módulo **Moderación**: canal de registro (mensajes borrados/editados, entradas, salidas, roles, apodos, silencios, baneos) y avisar / silenciar / expulsar / banear desde el panel con historial por usuario |
 | Solo el estado actual del servidor de juego | **Estadísticas** de cada servidor: gráficas de jugadores, TPS, MSPT, CPU, latencia y disponibilidad (1 h a 30 días) |
+| — | Módulo **Tickets**: panel con botones (un tipo de ticket por botón, con formulario opcional) que crea un canal privado en una categoría con el staff; desde el panel se responden, se atienden, se cierran con o sin motivo y queda el historial con transcripción |
 | Todo mezclado | Cada función es un módulo independiente que se activa/desactiva al instante |
 
 ## Puesta en marcha

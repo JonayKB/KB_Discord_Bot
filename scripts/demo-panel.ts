@@ -5,6 +5,7 @@
  *
  * No toca tu base de datos real: usa una carpeta temporal.
  */
+import { ChannelType } from 'discord.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -55,6 +56,7 @@ async function main() {
     const { ReactionRolesService, createReactionsModule } = await import(src('modules/reactions'));
     const { WelcomeService, createWelcomeModule } = await import(src('modules/welcome'));
     const { ModerationService, createModerationModule } = await import(src('modules/moderation'));
+    const { TicketsService, createTicketsModule } = await import(src('modules/tickets'));
     const { startFakeMinecraft, startFakeSpark } = await import('./fake-game-servers');
     const { startWebServer } = await import(src('web/server'));
     const { migrateLegacy } = await import(src('core/migrateLegacy'));
@@ -93,6 +95,8 @@ async function main() {
     manager.register(createReactionsModule(reactions));
     manager.register(createWelcomeModule(new WelcomeService(mock.client, db, messages)));
     manager.register(createModerationModule(new ModerationService(mock.client, db, messages)));
+    const tickets = new TicketsService(mock.client, db, messages);
+    manager.register(createTicketsModule(tickets));
     migrateLegacy(db);
 
     // Servidores de juego de ejemplo: un Minecraft falso (con métricas Spark) y uno apagado.
@@ -120,6 +124,22 @@ async function main() {
     addCase.run('102', people.find(p => p[0] === '102')![1], 'warn', 'Spam de invitaciones en #general', null, 'panel', 'sent', Date.now() - 5 * 3600_000);
     addCase.run('102', people.find(p => p[0] === '102')![1], 'timeout', 'Sigue con el spam tras el aviso', 3600_000, 'panel', 'sent', Date.now() - 4 * 3600_000);
     addCase.run('104', people.find(p => p[0] === '104')![1], 'note', 'Pide whitelist muy a menudo, ojo', null, 'panel', null, Date.now() - 26 * 3600_000);
+
+    // Tickets de ejemplo: un panel publicado y dos tickets (uno esperando respuesta y otro cerrado).
+    mock.addChannel('C_CAT', 'Tickets', ChannelType.GuildCategory);
+    const { panel: tPanel } = await tickets.createPanel({
+        name: 'Soporte', title: '🎫 Tickets', description: 'Pulsa un botón para abrir un ticket.', color: '#5865F2',
+        types: [
+            { label: 'Soporte', emoji: '🛠️', style: 'primary', categoryId: 'C_CAT', supportRoleIds: ['R_STAFF'], nameTemplate: 'ticket-{number}', welcome: '', questions: [], maxOpen: 1 },
+            { label: 'Reportar jugador', emoji: '🚨', style: 'danger', categoryId: 'C_CAT', supportRoleIds: ['R_STAFF'], nameTemplate: 'reporte-{number}', welcome: '', questions: [{ label: '¿A quién reportas?', placeholder: 'Nombre en Minecraft', long: false, required: true }], maxOpen: 1 },
+        ],
+    }, 'C_GEN');
+    const demoTicket = await tickets.open(mock.members.get('101'), tPanel.types[0].id, []);
+    tickets.onMessage({ guildId: 'G1', channelId: demoTicket.channelId, author: mock.members.get('101').user, member: mock.members.get('101'), content: 'Hola, no puedo entrar al servidor, me sale "You are not whitelisted".', attachments: new Map(), id: 'x1', createdTimestamp: Date.now() - 600_000 } as never);
+    const oldTicket = await tickets.open(mock.members.get('102'), tPanel.types[1].id, [{ question: '¿A quién reportas?', answer: 'Herobrine' }]);
+    tickets.onMessage({ guildId: 'G1', channelId: oldTicket.channelId, author: mock.members.get('102').user, member: mock.members.get('102'), content: 'Me ha roto la casa', attachments: new Map(), id: 'x2', createdTimestamp: Date.now() - 300_000 } as never);
+    await tickets.reply(oldTicket.id, { id: 'ADMIN', name: 'admin' }, 'Gracias, lo revisamos y ya está sancionado.', []);
+    await tickets.close(oldTicket.id, { id: 'ADMIN', name: 'admin' }, 'Jugador sancionado');
 
     // Roles por reacción de ejemplo
     mock.addRole('R_UNVER', 'Sin verificar', '#99aab5');

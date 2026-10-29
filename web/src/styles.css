@@ -329,3 +329,12 @@ td.shrink, th.shrink { width: 1%; white-space: nowrap; }
 .uptime-key.ok { background: var(--ok); }
 .uptime-key.down { background: var(--danger); }
 .uptime-key.partial { background: var(--warn); }
+
+/* ───── Tickets ───── */
+.bubble .author { font-size: 12px; font-weight: 700; margin-bottom: 2px; opacity: .85; }
+.sys-msg { align-self: center; color: var(--muted); font-size: 12.5px; text-align: center; white-space: pre-wrap; max-width: 80%; padding: 4px 10px; border: 1px dashed var(--border); border-radius: 8px; }
+.ticket-num { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.ticket-info { padding: 10px 20px; border-bottom: 1px solid var(--border); background: var(--panel-2); display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; }
+.ticket-info dt { color: var(--muted); display: inline; }
+.ticket-info dd { display: inline; margin: 0 0 0 4px; }
+.closed-bar { padding: 12px 20px; border-top: 1px solid var(--border); background: var(--panel); color: var(--muted); font-size: 13px; }

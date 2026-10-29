@@ -207,6 +207,72 @@ const MIGRATIONS: string[] = [
     );
     CREATE INDEX idx_server_samples ON server_samples (server_id, ts);
     `,
+    /* v5: tickets */ `
+    CREATE TABLE ticket_panels (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        name        TEXT NOT NULL,
+        channel_id  TEXT,
+        message_id  TEXT,
+        title       TEXT NOT NULL DEFAULT '🎫 Tickets',
+        description TEXT NOT NULL DEFAULT 'Pulsa un botón para abrir un ticket.',
+        color       TEXT NOT NULL DEFAULT '#5865F2',
+        created_at  INTEGER NOT NULL
+    );
+
+    -- Cada botón del panel es un tipo de ticket (soporte, reportes…), con su propia configuración.
+    CREATE TABLE ticket_types (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        panel_id         INTEGER NOT NULL REFERENCES ticket_panels (id) ON DELETE CASCADE,
+        label            TEXT NOT NULL,
+        emoji            TEXT NOT NULL DEFAULT '',
+        style            TEXT NOT NULL DEFAULT 'primary' CHECK (style IN ('primary','secondary','success','danger')),
+        category_id      TEXT,                          -- categoría donde se crean los canales
+        support_role_ids TEXT NOT NULL DEFAULT '[]',
+        name_template    TEXT NOT NULL DEFAULT 'ticket-{number}',
+        welcome          TEXT NOT NULL DEFAULT '',
+        questions        TEXT NOT NULL DEFAULT '[]',    -- formulario al abrir (máx. 5)
+        max_open         INTEGER NOT NULL DEFAULT 1,    -- tickets abiertos a la vez por usuario (0 = sin límite)
+        position         INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE tickets (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        number          INTEGER NOT NULL,
+        type_id         INTEGER REFERENCES ticket_types (id) ON DELETE SET NULL,
+        type_label      TEXT NOT NULL,
+        user_id         TEXT NOT NULL,
+        user_tag        TEXT,
+        user_avatar     TEXT,
+        channel_id      TEXT,
+        status          TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','closed')),
+        answers         TEXT NOT NULL DEFAULT '[]',
+        claimed_by_id   TEXT,
+        claimed_by_name TEXT,
+        close_reason    TEXT,
+        closed_by_id    TEXT,
+        closed_by_name  TEXT,
+        created_at      INTEGER NOT NULL,
+        closed_at       INTEGER,
+        last_message_at INTEGER NOT NULL
+    );
+    CREATE INDEX idx_tickets_status ON tickets (status, last_message_at);
+    CREATE INDEX idx_tickets_user ON tickets (user_id);
+    CREATE INDEX idx_tickets_channel ON tickets (channel_id);
+
+    CREATE TABLE ticket_messages (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        ticket_id     INTEGER NOT NULL REFERENCES tickets (id) ON DELETE CASCADE,
+        discord_id    TEXT,
+        author_id     TEXT,
+        author_name   TEXT,
+        author_avatar TEXT,
+        kind          TEXT NOT NULL CHECK (kind IN ('user','staff','panel','system')),
+        content       TEXT NOT NULL DEFAULT '',
+        attachments   TEXT NOT NULL DEFAULT '[]',     -- [{ name, url }]
+        created_at    INTEGER NOT NULL
+    );
+    CREATE INDEX idx_ticket_messages ON ticket_messages (ticket_id, id);
+    `,
 ];
 
 export function openDb(file = path.join(DATA_DIR, 'bot.db')): DB {

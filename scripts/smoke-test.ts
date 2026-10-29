@@ -54,6 +54,7 @@ async function main() {
     const { ReactionRolesService, createReactionsModule } = await import(src('modules/reactions'));
     const { WelcomeService, createWelcomeModule } = await import(src('modules/welcome'));
     const { ModerationService, createModerationModule } = await import(src('modules/moderation'));
+    const { TicketsService, createTicketsModule } = await import(src('modules/tickets'));
     const { startFakeMinecraft, startFakeSpark } = await import('./fake-game-servers');
     const { startWebServer } = await import(src('web/server'));
     const { migrateLegacy, migrateReactions, migrateServers } = await import(src('core/migrateLegacy'));
@@ -76,6 +77,8 @@ async function main() {
     for (const [id, name] of [['R_PING', 'Avisos'], ['R_NEWS', 'Noticias'], ['R_A', 'A'], ['R_VER', 'Verificado'], ['R_UNVER', 'Sin verificar'], ['R_B', 'B'], ['R_C', 'C'], ['R_RED', 'Rojo'], ['R_BLUE', 'Azul']]) mock.addRole(id, name);
     mock.addEmoji('111111111111111111', 'kbheart');
     mock.addChannel('C_LOG', 'registro');
+    mock.addChannel('CAT1', 'Soporte', ChannelType.GuildCategory);
+    mock.addRole('R_SUP', 'Soporte');
 
     // ── Servicios (igual que index.ts) ──
     const db = openDb();
@@ -88,6 +91,7 @@ async function main() {
     const reactions = new ReactionRolesService(client, db);
     const welcome = new WelcomeService(client, db, messages);
     const moderation = new ModerationService(client, db, messages);
+    const tickets = new TicketsService(client, db, messages);
     setServices({ messages, confirmations, servers: gameServers, reactions });
     manager.register(createMessagesModule(messages, db));
     manager.register(createInboxModule(inbox, messages, db));
@@ -97,6 +101,7 @@ async function main() {
     manager.register(createReactionsModule(reactions));
     manager.register(createWelcomeModule(welcome));
     manager.register(createModerationModule(moderation));
+    manager.register(createTicketsModule(tickets));
     const fakeMc = startFakeMinecraft(38200, { online: 2, max: 20, players: ['Steve', 'Alex'], version: 'Paper 1.21.1', motd: 'MCKB Survival' });
     const fakeSpark = startFakeSpark(38201);
     migrateLegacy(db);
@@ -643,6 +648,147 @@ async function main() {
     await call('POST', '/api/modules/moderation/enabled', { enabled: true });
     ok('borrar un caso y desactivar el módulo en caliente');
 
+    console.log('\nTickets');
+    /** Simula pulsar un botón (o enviar un formulario si se pasa `modal`) en Discord. */
+    const interact = (customId: string, userId: string, modal?: Record<string, string>) => {
+        const log: any = { replies: [] as any[], modal: null };
+        const i: any = {
+            customId, user: members.get(userId).user, guild: mock.guild, deferred: false, replied: false,
+            isButton: () => !modal, isModalSubmit: () => !!modal,
+            fields: { getTextInputValue: (k: string) => { if (!modal || !(k in modal)) throw new Error('vacío'); return modal[k]; } },
+            reply: async (o: any) => { i.replied = true; log.replies.push(o); },
+            deferReply: async () => { i.deferred = true; },
+            editReply: async (o: any) => { log.replies.push(o); },
+            showModal: async (m: any) => { log.modal = m; },
+            update: async (o: any) => { log.replies.push(o); },
+            deferUpdate: async () => { i.deferred = true; },
+        };
+        client.emit('interactionCreate', i);
+        return log;
+    };
+    const text = (r: any) => (typeof r === 'string' ? r : r?.content ?? '');
+    const say = (channelId: string, userId: string, content: string) => client.emit('messageCreate', {
+        id: `tm${Math.random()}`, guildId: 'G1', channelId, channel: { type: ChannelType.GuildText }, content, author: members.get(userId).user, member: members.get(userId),
+        attachments: new Collection(), createdTimestamp: Date.now(),
+    });
+
+    await call('PUT', '/api/tickets/config', { logChannelId: 'C_LOG', deleteOnClose: true, closeDelaySec: 0, dmOnClose: true, attachTranscript: true });
+    assert.equal((await call('POST', '/api/tickets/panels', { name: 'X', types: [{ label: 'A', categoryId: 'C1' }] })).status, 400, 'la categoría tiene que ser una categoría');
+    const tp = await call('POST', '/api/tickets/panels', {
+        name: 'Soporte', channelId: 'C1', title: 'Tickets', description: 'Pulsa un botón para abrir un ticket',
+        types: [
+            { label: 'Soporte', emoji: '🛠️', categoryId: 'CAT1', supportRoleIds: ['R_SUP'] },
+            { label: 'Reportar', style: 'danger', questions: [{ label: '¿A quién reportas?' }, { label: 'Pruebas', long: true, required: false }] },
+        ],
+    });
+    assert.equal(tp.status, 201, JSON.stringify(tp.json));
+    const [tSup, tRep] = tp.json.panel.types;
+    const panelMsg = channelsSent.at(-1);
+    assert.equal(panelMsg.embeds[0].data.title, 'Tickets');
+    assert.deepEqual(panelMsg.components[0].components.map((b: any) => b.data.custom_id), [`tk:open:${tSup.id}`, `tk:open:${tRep.id}`]);
+    ok('crear y publicar el panel con un botón por tipo de ticket');
+
+    let r = interact(`tk:open:${tSup.id}`, 'U1');
+    await sleep(80);
+    const createdLog = mock.channelLog.find((l: string) => l.startsWith('create:'))!;
+    assert.match(createdLog, /^create:TC\d+:ticket-0001$/);
+    const tc1 = createdLog.split(':')[1];
+    assert.match(text(r.replies.at(-1)), new RegExp(`<#${tc1}>`));
+    const ow = mock.channels.get(tc1).overwrites;
+    assert.ok(ow.some((o: any) => o.id === 'G1' && o.deny) && ow.some((o: any) => o.id === 'U1') && ow.some((o: any) => o.id === 'R_SUP'));
+    assert.equal(mock.channels.get(tc1).parentId, 'CAT1');
+    const opening = channelsSent.at(-1);
+    assert.equal(opening.channelId, tc1);
+    assert.match(opening.content, /<@U1> <@&R_SUP>/);
+    assert.deepEqual(opening.components[0].components.map((b: any) => b.data.label), ['Cerrar', 'Cerrar con motivo', 'Atender']);
+    ok('pulsar el botón crea un canal privado (usuario + soporte) en la categoría, con el mensaje inicial');
+
+    r = interact(`tk:open:${tSup.id}`, 'U1');
+    await sleep(50);
+    assert.match(text(r.replies.at(-1)), /Ya tienes un ticket abierto/);
+    ok('límite de tickets abiertos por usuario');
+
+    r = interact(`tk:open:${tRep.id}`, 'U2');
+    await sleep(20);
+    assert.equal(r.modal.data.title, 'Reportar');
+    assert.equal(r.modal.components.length, 2);
+    interact(`tk:form:${tRep.id}`, 'U2', { q0: 'Un tal Pepe' });
+    await sleep(80);
+    let list = (await call('GET', '/api/tickets?status=open')).json;
+    assert.equal(list.counts.open, 2);
+    const repT = list.tickets.find((t: any) => t.typeLabel === 'Reportar');
+    assert.deepEqual(repT.answers, [{ question: '¿A quién reportas?', answer: 'Un tal Pepe' }, { question: 'Pruebas', answer: '' }]);
+    ok('tipo con formulario: las respuestas se guardan y aparecen en el ticket');
+
+    const sup = list.tickets.find((t: any) => t.typeLabel === 'Soporte');
+    say(tc1, 'U1', 'Necesito ayuda <script>');
+    await sleep(30);
+    assert.equal((await call('GET', `/api/tickets/${sup.id}`)).json.ticket.lastKind, 'user', 'queda "esperando respuesta"');
+    assert.equal((await call('GET', '/api/tickets')).json.counts.waiting >= 1, true);
+    const rep1 = await call('POST', `/api/tickets/${sup.id}/reply`, { content: 'Hola, ¿qué te pasa?' });
+    assert.equal(rep1.status, 201);
+    assert.equal(channelsSent.at(-1).content, '**Desarrollo:** Hola, ¿qué te pasa?');
+    const detail = (await call('GET', `/api/tickets/${sup.id}`)).json;
+    assert.deepEqual(detail.messages.map((m: any) => m.kind), ['system', 'user', 'panel']);
+    assert.equal(detail.ticket.lastKind, 'panel');
+    assert.equal((await call('POST', `/api/tickets/${sup.id}/reply`, { content: '  ' })).status, 400);
+    ok('los mensajes del canal se guardan y se puede responder desde el panel');
+
+    r = interact(`tk:claim:${sup.id}`, 'U3');
+    await sleep(30);
+    assert.match(text(r.replies.at(-1)), /Solo quien abrió el ticket o el staff/);
+    members.get('U2').roles.cache.set('R_SUP', { id: 'R_SUP' });
+    interact(`tk:claim:${sup.id}`, 'U2');
+    await sleep(50);
+    assert.equal((await call('GET', `/api/tickets/${sup.id}`)).json.ticket.claimedById, 'U2');
+    ok('"Atender" solo para el staff (rol de soporte)');
+
+    r = interact(`tk:close:${sup.id}`, 'U1');
+    await sleep(20);
+    assert.equal(r.replies[0].components[0].components[0].data.custom_id, `tk:closeok:${sup.id}`, 'pide confirmación');
+    const sentT = sent.length;
+    interact(`tk:closereason:${sup.id}`, 'U1', { reason: 'Ya está resuelto' });
+    await sleep(150);
+    const closed = (await call('GET', `/api/tickets/${sup.id}`)).json.ticket;
+    assert.equal(closed.status, 'closed');
+    assert.equal(closed.closeReason, 'Ya está resuelto');
+    const closeDm = sent.slice(sentT).find((m: any) => m.to === 'U1');
+    assert.match(closeDm.opts.embeds[0].data.title, /Tu ticket #0001 se ha cerrado/);
+    assert.equal(closeDm.opts.files.length, 1, 'transcripción adjunta');
+    assert.ok(channelsSent.some((o: any) => o.channelId === 'C_LOG' && /Ticket #0001 cerrado/.test(o.embeds?.[0]?.data?.title ?? '')));
+    assert.ok(mock.channelLog.includes(`delete:${tc1}`));
+    assert.equal((await call('GET', `/api/tickets/${sup.id}`)).json.ticket.closeReason, 'Ya está resuelto', 'el borrado del propio bot no lo cambia');
+    ok('cerrar con motivo: aviso en el canal, MD con transcripción, registro y borrado del canal');
+
+    const tr = await fetch(`${base}/api/tickets/${sup.id}/transcript`, { headers: { cookie, 'x-requested-with': 'kb-panel' } });
+    const transcript = await tr.text();
+    assert.match(tr.headers.get('content-disposition') ?? '', /ticket-0001\.html/);
+    assert.ok(transcript.includes('Necesito ayuda &lt;script&gt;') && transcript.includes('Ya está resuelto'));
+    ok('descargar la transcripción (HTML escapado)');
+
+    await call('PUT', '/api/tickets/config', { logChannelId: null, deleteOnClose: false, closeDelaySec: 0, dmOnClose: false, attachTranscript: false });
+    const c2 = await call('POST', `/api/tickets/${repT.id}/close`, {});
+    assert.equal(c2.status, 200);
+    assert.equal(c2.json.closeReason, null);
+    assert.ok(mock.channelLog.some((l: string) => l.startsWith(`rename:${repT.channelId}:cerrado-0002`)), 'sin borrar: se renombra');
+    assert.ok(mock.channelLog.some((l: string) => l.startsWith(`perm:${repT.channelId}:U2:`)), 'y el usuario ya no puede escribir');
+    assert.equal((await call('POST', `/api/tickets/${repT.id}/close`, {})).status, 400);
+    ok('cerrar sin motivo desde el panel (y bloquear el canal en vez de borrarlo)');
+
+    interact(`tk:open:${tSup.id}`, 'U1');
+    await sleep(80);
+    const t3 = (await call('GET', '/api/tickets?status=open')).json.tickets[0];
+    assert.equal(t3.number, 3);
+    assert.equal((await call('DELETE', `/api/tickets/${t3.id}`)).status, 400, 'no se borra uno abierto');
+    await (await client.channels.fetch(t3.channelId)).delete();
+    await sleep(50);
+    const t3c = (await call('GET', `/api/tickets/${t3.id}`)).json.ticket;
+    assert.equal(t3c.status, 'closed');
+    assert.match(t3c.closeReason, /borró a mano/);
+    assert.equal((await call('DELETE', `/api/tickets/${t3.id}`)).status, 200);
+    assert.equal((await call('GET', '/api/tickets?q=Reportar')).json.tickets.length, 1, 'búsqueda');
+    ok('borrar el canal a mano lo cierra; borrar del historial; búsqueda');
+
     console.log('\nMódulos en caliente');
     await call('POST', '/api/modules/messages/enabled', { enabled: false });
     assert.equal((await call('POST', '/api/messages/send', { target: { type: 'user', id: 'U1' }, payload: { content: 'x' } })).status, 409);
@@ -663,7 +809,7 @@ async function main() {
     ok('desactivar/activar la bandeja quita y pone el listener al instante');
 
     const st = (await call('GET', '/api/status')).json;
-    assert.equal(st.modules.length, 8);
+    assert.equal(st.modules.length, 9);
     assert.ok(st.stats.sent24h > 5);
     ok('estado general');
 

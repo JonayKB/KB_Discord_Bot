@@ -266,3 +266,25 @@ export interface ModCase {
     moderatorId: string | null; moderatorName: string | null; source: 'panel' | 'discord'; dmStatus: 'sent' | 'failed' | null; createdAt: number;
 }
 export interface BanInfo { userId: string; username: string; avatar: string; reason: string | null }
+
+export type TicketButtonStyle = 'primary' | 'secondary' | 'success' | 'danger';
+export interface TicketQuestion { label: string; placeholder: string; long: boolean; required: boolean }
+export interface TicketType {
+    id?: number; label: string; emoji: string; style: TicketButtonStyle; categoryId: string | null; supportRoleIds: string[];
+    nameTemplate: string; welcome: string; questions: TicketQuestion[]; maxOpen: number;
+}
+export interface TicketPanel {
+    id: number; name: string; channelId: string | null; messageId: string | null; title: string; description: string; color: string; createdAt: number; types: TicketType[];
+}
+export interface Ticket {
+    id: number; number: number; typeId: number | null; typeLabel: string; userId: string; userTag: string | null; userAvatar: string | null;
+    channelId: string | null; status: 'open' | 'closed'; answers: Array<{ question: string; answer: string }>;
+    claimedById: string | null; claimedByName: string | null; closeReason: string | null; closedById: string | null; closedByName: string | null;
+    createdAt: number; closedAt: number | null; lastMessageAt: number; lastKind: TicketMessage['kind'] | null; messageCount: number;
+}
+export interface TicketMessage {
+    id: number; ticketId: number; authorId: string | null; authorName: string | null; authorAvatar: string | null;
+    kind: 'user' | 'staff' | 'panel' | 'system'; content: string; attachments: Array<{ name: string; url: string }>; createdAt: number;
+}
+export interface TicketsConfig { logChannelId: string | null; deleteOnClose: boolean; closeDelaySec: number; dmOnClose: boolean; attachTranscript: boolean }
+export interface Category { id: string; name: string }

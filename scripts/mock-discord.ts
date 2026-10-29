@@ -34,7 +34,8 @@ export function createMockDiscord(guildId = 'G1') {
         const user = users.get(id) ?? mkUser(id, username);
         const m: any = {
             id, user, displayName: user.globalName, nickname: null, manageable: true,
-            moderatable: true, kickable: true, bannable: true, partial: false,
+            moderatable: true, kickable: true, bannable: true, partial: false, isAdmin: false,
+            permissions: { has: () => m.isAdmin },
             joinedTimestamp: Date.now() - 86_400_000, communicationDisabledUntilTimestamp: null,
             get guild() { return guild; },
             timeout: async (ms: number | null) => { m.communicationDisabledUntilTimestamp = ms ? Date.now() + ms : null; modLog.push(`timeout:${id}:${ms}`); },
@@ -63,7 +64,7 @@ export function createMockDiscord(guildId = 'G1') {
     const addEmoji = (id: string, name: string) => emojis.set(id, { id, name, animated: false, toString: () => `<:${name}:${id}>`, imageURL: () => '' });
 
     const channels = new Collection<string, any>();
-    const addChannel = (id: string, name: string) => channels.set(id, { id, name, type: ChannelType.GuildText, position: channels.size, parent: null });
+    const addChannel = (id: string, name: string, type: ChannelType = ChannelType.GuildText) => channels.set(id, { id, name, type, position: channels.size, parent: null });
 
     const guild: any = {
         id: guildId, name: 'MCKBServers', get memberCount() { return members.size; }, iconURL: () => null,
@@ -138,6 +139,33 @@ export function createMockDiscord(guildId = 'G1') {
         client.emit(add ? 'messageReactionAdd' : 'messageReactionRemove', r, users.get(userId));
     };
     let sentCount = 0;
+    const channelLog: string[] = [];
+    /** Lo que devuelve client.channels.fetch(): el canal con send/edit/borrar. */
+    const channelApi = (id: string): any => {
+        const c = channels.get(id);
+        if (!c) return null;
+        return {
+            ...c,
+            send: async (o: any) => { channelsSent.push({ ...o, channelId: id }); return mkMessage(`cm${++sentCount}`, id); },
+            messages: {
+                fetch: async (mid: string) => {
+                    if (mid.startsWith('9')) throw Object.assign(new Error('Unknown Message'), { code: 10008 });
+                    return getMessage(mid, id);
+                },
+            },
+            delete: async () => { channels.delete(id); channelLog.push(`delete:${id}`); client.emit('channelDelete', { id }); },
+            setName: async (n: string) => { c.name = n; channelLog.push(`rename:${id}:${n}`); },
+            permissionOverwrites: { edit: async (target: string, p: any) => { channelLog.push(`perm:${id}:${target}:${JSON.stringify(p)}`); } },
+        };
+    };
+    let createdChannels = 0;
+    guild.channels.create = async (o: any) => {
+        const id = `TC${++createdChannels}`;
+        channels.set(id, { id, name: o.name, type: o.type, position: channels.size, parent: o.parent ? channels.get(o.parent) ?? null : null, parentId: o.parent ?? null, overwrites: o.permissionOverwrites, topic: o.topic });
+        channelLog.push(`create:${id}:${o.name}`);
+        return channelApi(id);
+    };
+    guild.roles.everyone = { id: guildId };
 
     const client: any = new EventEmitter();
     Object.assign(client, {
@@ -150,26 +178,11 @@ export function createMockDiscord(guildId = 'G1') {
                 ? (() => { throw Object.assign(new Error('Unknown User'), { code: 10013 }); })()
                 : mkUser(id, `user-${id}`)),
         },
-        channels: {
-            fetch: async (id: string) => {
-                const c = channels.get(id);
-                if (!c) return null;
-                return {
-                    ...c,
-                    send: async (o: any) => { channelsSent.push(o); return mkMessage(`cm${++sentCount}`, id); },
-                    messages: {
-                        fetch: async (mid: string) => {
-                            if (mid.startsWith('9')) throw Object.assign(new Error('Unknown Message'), { code: 10008 });
-                            return getMessage(mid, id);
-                        },
-                    },
-                };
-            },
-        },
+        channels: { fetch: async (id: string) => channelApi(id) },
     });
 
     return {
-        client, guild, members, roles, channels, users, sent, roleLog, nickLog, channelsSent, counterEdits, reactLog, deletedMessages, modLog, bans,
+        client, guild, members, roles, channels, users, sent, roleLog, nickLog, channelsSent, counterEdits, reactLog, deletedMessages, modLog, bans, channelLog,
         mkUser, addMember, addRole, addChannel, addEmoji, getMessage, userReact,
     };
 }

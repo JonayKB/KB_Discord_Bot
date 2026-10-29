@@ -25,6 +25,7 @@ const PATHS: Record<string, ReactNode> = {
     back: <><path d="M15 18l-6-6 6-6" /></>,
     logout: <><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" /><path d="M16 17l5-5-5-5M21 12H9" /></>,
     search: <><circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" /></>,
+    ticket: <><path d="M3 7a2 2 0 012-2h14a2 2 0 012 2v3a2 2 0 000 4v3a2 2 0 01-2 2H5a2 2 0 01-2-2v-3a2 2 0 000-4z" /><path d="M13 5v2M13 11v2M13 17v2" /></>,
     chart: <><path d="M3 3v18h18" /><path d="M7 15l4-4 3 3 5-6" /></>,
     shield: <><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></>,
     wave: <><path d="M7 11V6a2 2 0 014 0v5" /><path d="M11 10V4a2 2 0 014 0v6" /><path d="M15 10V6a2 2 0 014 0v8a7 7 0 01-7 7h-1a7 7 0 01-6-3.5L3 14a2 2 0 013.4-2L8 14" /></>,

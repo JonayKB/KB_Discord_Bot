@@ -37,6 +37,7 @@ export const SOURCE_LABEL: Record<string, string> = {
     welcome: 'Bienvenida',
     system: 'Sistema',
     dm: 'MD recibido',
+    ticket: 'Ticket',
 };
 
 // ───────────── Zonas horarias (para el editor de programaciones) ─────────────
