@@ -12,6 +12,7 @@ Bot de Discord de MCKBServers, ahora **modular** y con un **panel web** para ges
 | No se enviaban imágenes | Texto, embeds e **imágenes/archivos** a un usuario, varios, un rol, todo el servidor o un canal; plantillas reutilizables y variables (`{user}`, `{server}`…) |
 | Una sola confirmación, y borrar a alguien era editar JSON | Módulo **Confirmaciones**: **varias campañas a la vez** (cada una con su formulario, roles, contador y calendario), borrar/añadir/corregir confirmados desde el panel |
 | Estado de un solo servidor, configurado en el `.env` | Módulo **Servidores de juego**: varios servidores de Minecraft y Hytale, estadísticas en directo en el panel (jugadores, latencia, TPS, MSPT, CPU, versión) y su mensaje de estado en Discord, todo editable sin reiniciar |
+| `/setreaction`: un emoji → un rol, guardado en `config.json` | Módulo **Roles por reacción**: varios emojis y roles por mensaje, cada uno con su comportamiento (normal, permanente, quitar rol, invertido o pulsar), modo exclusivo (un solo rol a la vez), publicar mensajes nuevos o usar uno que ya existe, todo editable desde el panel |
 | Todo mezclado | Cada función es un módulo independiente que se activa/desactiva al instante |
 
 ## Puesta en marcha
@@ -60,6 +61,7 @@ Al arrancar por primera vez, el bot convierte tu configuración antigua (sin bor
 - El cron fijo de las 14:00 → una tarea editable **"Envío diario de la confirmación"**.
 - Los botones de los MD que ya enviaste **siguen funcionando**.
 - `SERVER_TYPE` + `MINECRAFT_*` / `HYTALE_*` del `.env` y el mensaje de estado de `config.json` → un servidor en **Servidores de juego** (después esas variables ya no se usan).
+- Los roles por reacción de `config.json` (`/setreaction`) → **Roles por reacción**, uno por mensaje y con el comportamiento de siempre (reaccionar da el rol, quitar la reacción lo quita). Nadie pierde sus roles y los mensajes siguen funcionando igual.
 
 ## Estructura
 
@@ -78,7 +80,7 @@ src/
     confirmations/         campañas, formularios, confirmados, contador
     servers/               servidores de juego: consulta (MC/Hytale), estado en el panel y mensaje en Discord
   web/                     servidor del panel (Express + WebSocket) y login con Discord
-  commands/ events/ utils/ código anterior: roles por reacción, bienvenida, /create_info_message
+  commands/ events/ utils/ código anterior: bienvenida, /create_info_message, /setreaction
 web/                       panel (React + Vite)
 scripts/                   smoke-test.ts, demo-panel.ts, fake-game-servers.ts
 ```
@@ -118,7 +120,7 @@ npm run smoke        # 28 pruebas automáticas de los flujos principales con Dis
 - **Módulo Mensajes desactivado = pausa global**: el bot no envía nada (ni programado ni confirmaciones) hasta reactivarlo.
 - **Envíos masivos**: 1 MD por segundo aprox. para respetar los rate limits; el progreso se ve en directo.
 - La bandeja solo lista conversaciones "reales" (alguien te escribió, o tú le escribiste/respondiste a un usuario); los MD automáticos y masivos quedan en el Historial.
-- El comando `/create_confirmation_message` ya no existe: el mensaje contador se crea desde **Confirmaciones**. `/setreaction` sigue igual.
+- El comando `/create_confirmation_message` ya no existe: el mensaje contador se crea desde **Confirmaciones**. `/setreaction` sigue funcionando (ahora con una opción `modo`) y lo que crea aparece en **Roles por reacción**.
 - `/create_info_message canal [servidor]` publica el mensaje de estado de un servidor de juego (por defecto el primero). Ahora solo lo ven quienes pueden **Gestionar el servidor**. Lo mismo se hace desde **Servidores**.
 - **Campañas solo para un rol**: la opción "Enviar solo a quien tenga alguno de estos roles" limita los envíos (y el "Enviar al unirse") a quien tenga ese rol. Sirve para encuestas a los ya confirmados, p. ej. elegir modpack. Con "Respuesta larga" el formulario es un párrafo de hasta 1000 caracteres.
 - **Servidores de juego**: en Minecraft, el estado y los jugadores salen del ping normal; con `enable-query=true` se ve la lista completa, y con el puerto de la API de métricas (Spark `/metrics`), TPS, MSPT y CPU. En Hytale se usa la API Nitrado Query. Los jugadores se asocian a Discord por lo que respondieron en las campañas.

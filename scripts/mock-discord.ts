@@ -52,6 +52,9 @@ export function createMockDiscord(guildId = 'G1') {
         return r;
     };
 
+    const emojis = new Collection<string, any>();
+    const addEmoji = (id: string, name: string) => emojis.set(id, { id, name, animated: false, toString: () => `<:${name}:${id}>`, imageURL: () => '' });
+
     const channels = new Collection<string, any>();
     const addChannel = (id: string, name: string) => channels.set(id, { id, name, type: ChannelType.GuildText, position: channels.size, parent: null });
 
@@ -59,6 +62,7 @@ export function createMockDiscord(guildId = 'G1') {
         id: guildId, name: 'MCKBServers', get memberCount() { return members.size; }, iconURL: () => null,
         members: { cache: members, fetch: async (id?: string) => (id ? members.get(id) : members) },
         roles: { cache: roles },
+        emojis: { cache: emojis },
         channels: {
             cache: channels,
             fetch: async (id: string) => channels.get(id)
@@ -67,9 +71,61 @@ export function createMockDiscord(guildId = 'G1') {
         },
     };
 
+    // ── Mensajes con reacciones (roles por reacción) ──
+    const BOT_ID = 'BOT';
+    const botUser = { id: BOT_ID, username: 'KB Bot', bot: true, displayAvatarURL: () => '' };
+    const messages = new Map<string, any>();
+    const reactLog: string[] = [];
+    const deletedMessages: string[] = [];
+    const parseEmoji = (e: string) => {
+        const m = /^<a?:(\w+):(\d+)>$/.exec(e);
+        return m ? { id: m[2], name: m[1] } : { id: null, name: e };
+    };
+    const mkMessage = (id: string, channelId: string) => {
+        const reactions = new Collection<string, any>();
+        const msg: any = {
+            id, channelId, guildId, guild, partial: false,
+            edit: async (o: any) => { counterEdits.push(o); return msg; },
+            delete: async () => { messages.delete(id); deletedMessages.push(id); },
+            fetch: async () => msg,
+            reactions: { cache: reactions },
+            react: async (e: string) => { const r = msg.reaction(e); r.userIds.add(BOT_ID); r.me = true; reactLog.push(`${id}:${e}`); return r; },
+            reaction: (e: string) => {
+                const emoji = parseEmoji(e);
+                const key = emoji.id ?? emoji.name!;
+                let r = reactions.get(key);
+                if (!r) {
+                    r = {
+                        emoji, me: false, message: msg, userIds: new Set<string>(),
+                        users: {
+                            remove: async (uid: string) => {
+                                if (!r.userIds.delete(uid)) return;
+                                if (uid === BOT_ID) r.me = false;
+                                reactLog.push(`-${id}:${e}:${uid}`);
+                                client.emit('messageReactionRemove', r, uid === BOT_ID ? botUser : users.get(uid));
+                            },
+                        },
+                    };
+                    reactions.set(key, r);
+                }
+                return r;
+            },
+        };
+        messages.set(id, msg);
+        return msg;
+    };
+    const getMessage = (id: string, channelId = 'C1') => messages.get(id) ?? mkMessage(id, channelId);
+    /** Simula que un usuario reacciona o quita su reacción. */
+    const userReact = (messageId: string, emoji: string, userId: string, add = true) => {
+        const r = getMessage(messageId).reaction(emoji);
+        if (add) r.userIds.add(userId); else r.userIds.delete(userId);
+        client.emit(add ? 'messageReactionAdd' : 'messageReactionRemove', r, users.get(userId));
+    };
+    let sentCount = 0;
+
     const client: any = new EventEmitter();
     Object.assign(client, {
-        user: { username: 'KB Bot', displayAvatarURL: () => '' },
+        user: botUser,
         isReady: () => true,
         ws: { ping: 38 },
         guilds: { cache: new Collection([[guildId, guild]]) },
@@ -84,12 +140,20 @@ export function createMockDiscord(guildId = 'G1') {
                 if (!c) return null;
                 return {
                     ...c,
-                    send: async (o: any) => { channelsSent.push(o); return { id: 'cm1' }; },
-                    messages: { fetch: async () => ({ edit: async (o: any) => counterEdits.push(o) }) },
+                    send: async (o: any) => { channelsSent.push(o); return mkMessage(`cm${++sentCount}`, id); },
+                    messages: {
+                        fetch: async (mid: string) => {
+                            if (mid.startsWith('9')) throw Object.assign(new Error('Unknown Message'), { code: 10008 });
+                            return getMessage(mid, id);
+                        },
+                    },
                 };
             },
         },
     });
 
-    return { client, guild, members, roles, channels, users, sent, roleLog, nickLog, channelsSent, counterEdits, mkUser, addMember, addRole, addChannel };
+    return {
+        client, guild, members, roles, channels, users, sent, roleLog, nickLog, channelsSent, counterEdits, reactLog, deletedMessages,
+        mkUser, addMember, addRole, addChannel, addEmoji, getMessage, userReact,
+    };
 }

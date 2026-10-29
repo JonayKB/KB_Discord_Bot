@@ -4,7 +4,6 @@ import { Cron } from "croner";
 
 import loadCommands from './commands/index';
 import loadEvents from './events/index';
-import { loadConfig } from './utils/configManager';
 import { Logger } from "./utils/Logger";
 import compressLogs from "./utils/LogCompreser";
 
@@ -12,7 +11,7 @@ import { openDb } from "./core/db";
 import { startLogCapture } from "./core/logs";
 import { ModuleManager } from "./core/module";
 import { setServices } from "./core/services";
-import { migrateLegacy, migrateServers } from "./core/migrateLegacy";
+import { migrateLegacy, migrateReactions, migrateServers } from "./core/migrateLegacy";
 import { startWebServer } from "./web/server";
 
 import { MessagesService, createMessagesModule } from "./modules/messages";
@@ -22,6 +21,7 @@ import { createConfirmationsModule } from "./modules/confirmations";
 import { SchedulerService } from "./modules/scheduler/service";
 import { createSchedulerModule } from "./modules/scheduler";
 import { ServersService, createServersModule } from "./modules/servers";
+import { ReactionRolesService, createReactionsModule } from "./modules/reactions";
 
 startLogCapture();
 const logger = new Logger("Index");
@@ -29,21 +29,6 @@ const logger = new Logger("Index");
 // Un error inesperado en una promesa no debe tumbar el bot entero.
 process.on('unhandledRejection', (reason) => logger.error('Unhandled rejection', reason));
 process.on('uncaughtException', (err) => logger.error('Uncaught exception', err));
-
-async function preloadMessages(client: Client) {
-    const config = loadConfig();
-    if (!config.reactions || config.reactions.length === 0) return;
-    for (const r of config.reactions) {
-        try {
-            const channel = await client.channels.fetch(r.canalID);
-            if (!channel || !('messages' in channel)) continue;
-            await channel.messages.fetch(r.mensajeID);
-        } catch (err) {
-            logger.error(`No se pudo precargar el mensaje de reacciones ${r.mensajeID}`, err);
-        }
-    }
-    logger.info("✅ All reaction messages preloaded");
-}
 
 const client = new Client({
     intents: [
@@ -81,15 +66,17 @@ const confirmations = new ConfirmationService(client, db, messages);
 const inbox = new InboxService(db, messages);
 const scheduler = new SchedulerService(db, messages, confirmations);
 const servers = new ServersService(client, db, confirmations);
-setServices({ messages, confirmations, servers });
+const reactions = new ReactionRolesService(client, db);
+setServices({ messages, confirmations, servers, reactions });
 
 manager.register(createMessagesModule(messages, db));
 manager.register(createInboxModule(inbox, messages, db));
 manager.register(createSchedulerModule(scheduler));
 manager.register(createConfirmationsModule(confirmations));
 manager.register(createServersModule(servers));
+manager.register(createReactionsModule(reactions));
 
-// ───────────── Código "clásico" (info del servidor, roles por reacción, bienvenida) ─────────────
+// ───────────── Código "clásico" (comandos y bienvenida) ─────────────
 loadCommands(client);
 loadEvents(client);
 
@@ -115,12 +102,11 @@ client.once('clientReady', async () => {
     try {
         migrateLegacy(db);
         migrateServers(db);
+        migrateReactions(db);
     } catch (err) {
         logger.error('❌ Falló la migración de datos antiguos', err);
     }
     await manager.startEnabled();
-
-    preloadMessages(client);
 
     // Set random activity status every X minutes
     const timeInterval = 5;

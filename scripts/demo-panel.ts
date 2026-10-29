@@ -52,6 +52,7 @@ async function main() {
     const { SchedulerService } = await import(src('modules/scheduler/service'));
     const { createSchedulerModule } = await import(src('modules/scheduler'));
     const { ServersService, createServersModule } = await import(src('modules/servers'));
+    const { ReactionRolesService, createReactionsModule } = await import(src('modules/reactions'));
     const { startFakeMinecraft, startFakeSpark } = await import('./fake-game-servers');
     const { startWebServer } = await import(src('web/server'));
     const { migrateLegacy } = await import(src('core/migrateLegacy'));
@@ -80,12 +81,14 @@ async function main() {
     const inbox = new InboxService(db, messages);
     const scheduler = new SchedulerService(db, messages, confirmations);
     const servers = new ServersService(mock.client, db, confirmations);
-    setServices({ messages, confirmations, servers });
+    const reactions = new ReactionRolesService(mock.client, db);
+    setServices({ messages, confirmations, servers, reactions });
     manager.register(createMessagesModule(messages, db));
     manager.register(createInboxModule(inbox, messages, db));
     manager.register(createSchedulerModule(scheduler));
     manager.register(createConfirmationsModule(confirmations));
     manager.register(createServersModule(servers));
+    manager.register(createReactionsModule(reactions));
     migrateLegacy(db);
 
     // Servidores de juego de ejemplo: un Minecraft falso (con métricas Spark) y uno apagado.
@@ -95,6 +98,24 @@ async function main() {
     addServer.run('MCKB Survival', 'minecraft', 38250, 38251, 'C_GEN', 'M_STATUS', Date.now());
     addServer.run('Hytale MCKB', 'hytale', null, 38252, null, null, Date.now());
     await manager.startEnabled();
+
+    // Roles por reacción de ejemplo
+    mock.addRole('R_UNVER', 'Sin verificar', '#99aab5');
+    mock.addRole('R_VER', 'Verificado', '#3ba55d');
+    await reactions.create({
+        name: 'Verificación', enabled: true, exclusive: false, title: '✅ Verificación', description: 'Reacciona para aceptar las normas y acceder al servidor.', color: '#3BA55D', showList: true,
+        entries: [
+            { emoji: '✅', roleId: 'R_VER', behavior: 'add', label: 'Acepto las normas' },
+            { emoji: '✅', roleId: 'R_UNVER', behavior: 'remove', label: '' },
+        ],
+    }, { type: 'new', channelId: 'C_GEN' });
+    await reactions.create({
+        name: 'Equipo', enabled: true, exclusive: true, title: 'Elige tu equipo', description: 'Solo puedes estar en uno.', color: '#FAA61A', showList: true,
+        entries: [
+            { emoji: '⛏️', roleId: 'R_VIP', behavior: 'toggle', label: 'Mineros' },
+            { emoji: '🔔', roleId: 'R_STAFF', behavior: 'click', label: 'Avisos' },
+        ],
+    }, { type: 'new', channelId: 'C_NEWS' });
 
     // ── Datos de ejemplo ──
     const imgPath = path.join(UPLOADS_DIR, 'demo-capture.png');

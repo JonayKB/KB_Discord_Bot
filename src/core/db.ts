@@ -149,6 +149,35 @@ const MIGRATIONS: string[] = [
     ALTER TABLE campaigns ADD COLUMN include_role_ids TEXT NOT NULL DEFAULT '[]';
     ALTER TABLE campaigns ADD COLUMN input_long INTEGER NOT NULL DEFAULT 0;
     `,
+    /* v3: roles por reacción */ `
+    CREATE TABLE reaction_panels (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        name         TEXT NOT NULL,
+        enabled      INTEGER NOT NULL DEFAULT 1,
+        exclusive    INTEGER NOT NULL DEFAULT 0,   -- solo un rol de este mensaje a la vez
+        channel_id   TEXT,
+        message_id   TEXT,
+        manage_embed INTEGER NOT NULL DEFAULT 1,   -- el bot escribe/edita el embed (0 = mensaje ajeno o antiguo)
+        title        TEXT NOT NULL DEFAULT '',
+        description  TEXT NOT NULL DEFAULT '',
+        color        TEXT NOT NULL DEFAULT '#5865F2',
+        show_list    INTEGER NOT NULL DEFAULT 1,   -- añadir al embed la lista emoji → rol
+        legacy       INTEGER NOT NULL DEFAULT 0,
+        created_at   INTEGER NOT NULL
+    );
+    CREATE INDEX idx_reaction_panels_message ON reaction_panels (message_id);
+
+    CREATE TABLE reaction_roles (
+        id       INTEGER PRIMARY KEY AUTOINCREMENT,
+        panel_id INTEGER NOT NULL REFERENCES reaction_panels (id) ON DELETE CASCADE,
+        emoji    TEXT NOT NULL,                    -- unicode, <:nombre:id> o (antiguo) solo el nombre
+        role_id  TEXT NOT NULL,
+        behavior TEXT NOT NULL DEFAULT 'toggle' CHECK (behavior IN ('toggle','add','remove','reverse','click')),
+        label    TEXT NOT NULL DEFAULT '',
+        position INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX idx_reaction_roles_panel ON reaction_roles (panel_id, position);
+    `,
 ];
 
 export function openDb(file = path.join(DATA_DIR, 'bot.db')): DB {

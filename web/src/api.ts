@@ -215,3 +215,28 @@ export interface GameServer {
     createdAt: number;
     status: ServerStatus | null;
 }
+
+export type ReactionBehavior = 'toggle' | 'add' | 'remove' | 'reverse' | 'click';
+
+export interface ReactionEntry { id?: number; emoji: string; roleId: string; behavior: ReactionBehavior; label: string }
+
+export interface ReactionPanel {
+    id: number;
+    name: string;
+    enabled: boolean;
+    exclusive: boolean;
+    channelId: string | null;
+    messageId: string | null;
+    manageEmbed: boolean;
+    title: string;
+    description: string;
+    color: string;
+    showList: boolean;
+    legacy: boolean;
+    createdAt: number;
+    entries: ReactionEntry[];
+    /** roleId → motivo por el que el bot no puede gestionarlo */
+    problems: Record<string, string>;
+}
+
+export interface GuildEmoji { id: string; name: string; animated: boolean; value: string; url: string }
