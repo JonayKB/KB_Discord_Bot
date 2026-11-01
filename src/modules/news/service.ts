@@ -9,7 +9,7 @@ import { NEWS_DIR, getSetting, setSetting } from '../../core/db';
 import { isInlineImage } from '../../core/files';
 import { HttpError, parseJson } from '../../core/http';
 import { Logger } from '../../utils/Logger';
-import { toPlainText, type MentionResolver } from './text';
+import { toMarkdown, toPlainText, type MentionResolver } from './text';
 
 const logger = new Logger('News');
 const KEY = 'news.config';
@@ -38,6 +38,7 @@ export interface NewsMessage {
     id: string;
     author: { name: string; avatarUrl?: string };
     content: string;
+    markdown?: string;
     createdAt: string;
     url: string;
     images: Array<{ url: string }>;
@@ -167,9 +168,14 @@ export class NewsService {
         const names = this.mentionResolver();
         const plain = (text: string | null | undefined) => (text ? toPlainText(text, names, env.timezone) : '');
         const richEmbeds = source.embeds.filter(e => e.data.type === 'rich');
+        const formatted = (text: string | null | undefined) => (text ? toMarkdown(text, names, env.timezone) : '');
         const content = [
             plain(source.content),
             ...richEmbeds.flatMap(e => [plain(e.title), plain(e.description)]),
+        ].filter(Boolean).join('\n\n');
+        const markdown = [
+            formatted(source.content),
+            ...richEmbeds.flatMap(e => [e.title && `**${formatted(e.title)}**`, formatted(e.description)]),
         ].filter(Boolean).join('\n\n');
 
         const sources: ImageSource[] = [];
@@ -204,6 +210,7 @@ export class NewsService {
                 ...(avatarUrl.startsWith('https://') ? { avatarUrl } : {}),
             },
             content,
+            ...(content ? { markdown } : {}),
             createdAt: msg.createdAt.toISOString(),
             url: msg.url,
             images,
