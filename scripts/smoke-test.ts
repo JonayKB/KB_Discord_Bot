@@ -57,7 +57,7 @@ async function main() {
     const { ModerationService, createModerationModule } = await import(src('modules/moderation'));
     const { TicketsService, createTicketsModule } = await import(src('modules/tickets'));
     const { NewsService, createNewsModule } = await import(src('modules/news'));
-    const { toPlainText } = await import(src('modules/news/text'));
+    const { toMarkdown, toPlainText } = await import(src('modules/news/text'));
     const { startFakeMinecraft, startFakeSpark, startFakeRcon, startFakeMojang } = await import('./fake-game-servers');
     const { startWebServer } = await import(src('web/server'));
     const { migrateLegacy, migrateReactions, migrateServers } = await import(src('core/migrateLegacy'));
@@ -950,7 +950,14 @@ async function main() {
         toPlainText('# Hola **<@1>** <@&2> <#3> <:kb:4> __a__ ~~b~~ ||c|| `*d*` \\*e\\* [web](https://x.com/a_b_c) **https://y.com/d_e_f**\n> cita snake_case_x', names, 'UTC'),
         'Hola @Steve_MC @Avisos #general :kb: a b c *d* *e* web: https://x.com/a_b_c https://y.com/d_e_f\ncita snake_case_x',
     );
+    assert.equal(toPlainText('**texto ** y __sub __ y ~~tachado ~~ y snake_case_x', names, 'UTC'), 'texto  y sub  y tachado  y snake_case_x');
     ok('el markdown y las menciones se convierten en texto plano sin romper URLs ni nombres');
+
+    assert.equal(
+        toMarkdown('## **<@1>** <@&2> <#3> <:kb:4> </cmd:5> `<@1>`\n```\n<#3>\n```\n\\<@1> ||s|| [web](https://x.com/a_b)', { ...names, user: () => 'a*b' }, 'UTC'),
+        '## **@a\\*b** @Avisos #general :kb: /cmd `<@1>`\n```\n<#3>\n```\n\\<@1> ||s|| [web](https://x.com/a_b)',
+    );
+    ok('el campo markdown conserva el formato y solo resuelve referencias fuera de código');
 
     const none = new Collection<string, any>();
     const newsMsg = (id: string, over: any = {}) => ({
@@ -984,6 +991,10 @@ async function main() {
     assert.deepEqual(feed.messages.map((m: any) => m.id), ['6', '5', '4', '1']);
     assert.equal(feed.messages[1].content, 'reenviado');
     assert.equal(feed.messages[2].content, 'Título\n\nTexto');
+    assert.equal(feed.messages[2].markdown, '**Título**\n\nTexto');
+    assert.equal(feed.messages[3].content, 'Hola');
+    assert.equal(feed.messages[3].markdown, '**Hola**');
+    assert.equal('markdown' in feed.messages[0], false);
     assert.deepEqual(feed.messages[0].poll, {
         question: '¿Modpack?', answers: [{ text: 'Create', emoji: '⚙️', votes: 12 }, { text: 'Otro', votes: 0 }], expiresAt: null, finalized: true,
     });
