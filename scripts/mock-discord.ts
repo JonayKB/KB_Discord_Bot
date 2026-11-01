@@ -145,6 +145,8 @@ export function createMockDiscord(guildId = 'G1') {
         if (add) r.userIds.add(userId); else r.userIds.delete(userId);
         client.emit(add ? 'messageReactionAdd' : 'messageReactionRemove', r, users.get(userId));
     };
+    /** Mensajes que devuelve channel.messages.fetch({ limit }). */
+    const history: any[] = [];
     let sentCount = 0;
     const channelLog: string[] = [];
     /** Lo que devuelve client.channels.fetch(): el canal con send/edit/borrar. */
@@ -153,9 +155,11 @@ export function createMockDiscord(guildId = 'G1') {
         if (!c) return null;
         return {
             ...c,
+            isTextBased: () => true,
             send: async (o: any) => { channelsSent.push({ ...o, channelId: id }); const m = mkMessage(`cm${++sentCount}`, id); m.setContent(o); return m; },
             messages: {
-                fetch: async (mid: string) => {
+                fetch: async (mid: any) => {
+                    if (typeof mid === 'object') return new Collection(history.filter(m => m.channelId === id).map(m => [m.id, m]));
                     if (mid.startsWith('9')) throw Object.assign(new Error('Unknown Message'), { code: 10008 });
                     return getMessage(mid, id);
                 },
@@ -190,6 +194,6 @@ export function createMockDiscord(guildId = 'G1') {
 
     return {
         client, guild, members, roles, channels, users, sent, roleLog, nickLog, channelsSent, counterEdits, reactLog, deletedMessages, modLog, bans, channelLog,
-        mkUser, addMember, addRole, addChannel, addEmoji, getMessage, userReact,
+        mkUser, addMember, addRole, addChannel, addEmoji, getMessage, userReact, history,
     };
 }

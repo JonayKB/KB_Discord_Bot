@@ -57,6 +57,7 @@ async function main() {
     const { WelcomeService, createWelcomeModule } = await import(src('modules/welcome'));
     const { ModerationService, createModerationModule } = await import(src('modules/moderation'));
     const { TicketsService, createTicketsModule } = await import(src('modules/tickets'));
+    const { NewsService, createNewsModule } = await import(src('modules/news'));
     const { startFakeMinecraft, startFakeSpark } = await import('./fake-game-servers');
     const { startWebServer } = await import(src('web/server'));
     const { migrateLegacy } = await import(src('core/migrateLegacy'));
@@ -97,6 +98,7 @@ async function main() {
     manager.register(createModerationModule(new ModerationService(mock.client, db, messages)));
     const tickets = new TicketsService(mock.client, db, messages);
     manager.register(createTicketsModule(tickets));
+    manager.register(createNewsModule(new NewsService(mock.client, db)));
     migrateLegacy(db);
 
     // Servidores de juego de ejemplo: un Minecraft falso (con métricas Spark) y uno apagado.

@@ -298,3 +298,18 @@ export interface WhitelistEntry {
     id: number; serverId: number; userId: string; username: string | null; mcName: string; mcUuid: string | null; status: WhitelistStatus;
     preexisting: boolean; source: 'form' | 'panel' | 'import'; addedBy: string | null; error: string | null; removedReason: string | null; createdAt: number; updatedAt: number;
 }
+
+export interface NewsMessage {
+    id: string;
+    author: { name: string; avatarUrl?: string };
+    content: string;
+    createdAt: string;
+    url: string;
+    images: Array<{ url: string }>;
+    poll: { question: string } | null;
+}
+export interface NewsState {
+    config: { channelId: string | null };
+    feed: { updatedAt: string; messages: NewsMessage[] } | null;
+    lastError: string | null;
+}

@@ -153,3 +153,4 @@ data/bot.db
 data/bot.db-shm
 data/bot.db-wal
 data/uploads/
+data/news/

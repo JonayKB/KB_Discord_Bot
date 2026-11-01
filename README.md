@@ -18,6 +18,7 @@ Bot de Discord de MCKBServers, ahora **modular** y con un **panel web** para ges
 | Solo el estado actual del servidor de juego | **Estadísticas** de cada servidor: gráficas de jugadores, TPS, MSPT, CPU, latencia y disponibilidad (1 h a 30 días) |
 | Whitelist a mano | **RCON** en cada servidor de Minecraft: consola desde el panel y whitelist automática a partir de una campaña de confirmación (un nombre por persona, sin repetidos, comprobado con Mojang, con cola si el servidor está apagado y sin tocar nunca los nombres añadidos a mano) |
 | — | Módulo **Tickets**: panel con botones (un tipo de ticket por botón, con formulario opcional) que crea un canal privado en una categoría con el staff; desde el panel se responden, se atienden, se cierran con o sin motivo y queda el historial con transcripción |
+| — | Módulo **Noticias**: publica los últimos mensajes de un canal en `/news/latest.json` (público) para el launcher, con imágenes propias y encuestas actualizadas |
 | Todo mezclado | Cada función es un módulo independiente que se activa/desactiva al instante |
 
 ## Puesta en marcha
@@ -117,7 +118,7 @@ Regístralo en `src/index.ts` con `manager.register(createMiModulo())` y aparece
 npm run dev          # bot con recarga
 npm run dev:web      # panel con recarga (http://localhost:5173, proxy al bot en :3000)
 npm run demo         # panel con un Discord SIMULADO y datos de ejemplo (http://localhost:3100) – no necesita token
-npm run smoke        # 28 pruebas automáticas de los flujos principales con Discord simulado
+npm run smoke        # pruebas automáticas de los flujos principales con Discord simulado
 ```
 
 ## Notas y cambios de comportamiento
@@ -134,4 +135,5 @@ npm run smoke        # 28 pruebas automáticas de los flujos principales con Dis
 - Se eliminó `NODE_TLS_REJECT_UNAUTHORIZED=0` global: desactivaba la verificación TLS de **todo** el proceso. Ahora solo se relaja en la petición al servidor de Hytale (certificado autofirmado).
 - `node-cron` se sustituyó por `croner` (zonas horarias, vista previa de próximas ejecuciones y pausa/reanudación).
 - Errores no capturados ya no tumban el bot, y hay apagado limpio con `pm2 reload`.
+- **Noticias**: el fichero se regenera desde Discord al escribir, editar o borrar en el canal y cada 5 minutos (recuento de encuestas). `/news/*` es público y sin sesión; con nginx basta el proxy general al bot. Es legible por cualquiera: elige un canal sin contenido privado.
 - Las imágenes recibidas se descargan a `data/uploads/` (los enlaces del CDN de Discord caducan).
