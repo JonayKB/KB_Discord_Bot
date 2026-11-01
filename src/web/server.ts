@@ -9,7 +9,7 @@ import { WebSocketServer, type WebSocket } from 'ws';
 import { bus, type BusEvent } from '../core/bus';
 import { env } from '../core/config';
 import type { DB } from '../core/db';
-import { UPLOADS_DIR } from '../core/db';
+import { NEWS_DIR, UPLOADS_DIR } from '../core/db';
 import { getFile, isInlineImage, registerFile, safeName, toFileInfo } from '../core/files';
 import { BotError, HttpError, asyncRoute, bool } from '../core/http';
 import { getLogs } from '../core/logs';
@@ -44,6 +44,15 @@ export function startWebServer({ client, db, manager }: WebDeps): http.Server {
 
     // ── Público: login ──
     app.use('/auth', createAuthRouter(db, client));
+
+    // ── Público: noticias que lee el launcher (sin sesión) ──
+    app.use('/news', express.static(NEWS_DIR, {
+        index: false,
+        redirect: false,
+        setHeaders: (res, file) => {
+            res.setHeader('Cache-Control', path.basename(file) === 'latest.json' ? 'no-cache' : 'public, max-age=86400');
+        },
+    }), (_req, res) => void res.status(404).end());
 
     // ── API (requiere sesión) ──
     const api = Router();

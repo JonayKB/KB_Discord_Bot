@@ -14,6 +14,7 @@ import Reactions from './pages/Reactions';
 import Welcome from './pages/Welcome';
 import Moderation from './pages/Moderation';
 import Tickets from './pages/Tickets';
+import News from './pages/News';
 import Modules from './pages/Modules';
 import Logs from './pages/Logs';
 
@@ -31,6 +32,7 @@ const NAV = [
     ['welcome', 'Bienvenida', 'wave'],
     ['moderation', 'Moderación', 'shield'],
     ['tickets', 'Tickets', 'ticket'],
+    ['news', 'Noticias', 'list'],
     ['modules', 'Módulos', 'grid'],
     ['logs', 'Registros', 'terminal'],
 ] as const;
@@ -128,6 +130,7 @@ export default function App() {
                     {page === 'welcome' && <Welcome />}
                     {page === 'moderation' && <Moderation />}
                     {page === 'tickets' && <Tickets sub={parts[1]} />}
+                    {page === 'news' && <News />}
                     {page === 'modules' && <Modules />}
                     {page === 'logs' && <Logs />}
                     {!NAV.some(n => n[0] === page) && <Dashboard />}

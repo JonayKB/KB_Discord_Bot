@@ -6,6 +6,7 @@ export type DB = Database.Database;
 
 export const DATA_DIR = path.join(process.cwd(), 'data');
 export const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
+export const NEWS_DIR = path.join(DATA_DIR, 'news');
 
 /**
  * Migraciones: cada elemento se aplica una sola vez, en orden.

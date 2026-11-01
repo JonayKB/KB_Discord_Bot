@@ -25,6 +25,7 @@ import { ReactionRolesService, createReactionsModule } from "./modules/reactions
 import { WelcomeService, createWelcomeModule } from "./modules/welcome";
 import { ModerationService, createModerationModule } from "./modules/moderation";
 import { TicketsService, createTicketsModule } from "./modules/tickets";
+import { NewsService, createNewsModule } from "./modules/news";
 
 startLogCapture();
 const logger = new Logger("Index");
@@ -75,6 +76,7 @@ const reactions = new ReactionRolesService(client, db);
 const welcome = new WelcomeService(client, db, messages);
 const moderation = new ModerationService(client, db, messages);
 const tickets = new TicketsService(client, db, messages);
+const news = new NewsService(client, db);
 setServices({ messages, confirmations, servers, reactions });
 
 manager.register(createMessagesModule(messages, db));
@@ -86,6 +88,7 @@ manager.register(createReactionsModule(reactions));
 manager.register(createWelcomeModule(welcome));
 manager.register(createModerationModule(moderation));
 manager.register(createTicketsModule(tickets));
+manager.register(createNewsModule(news));
 
 // ───────────── Código "clásico" (comandos) ─────────────
 loadCommands(client);

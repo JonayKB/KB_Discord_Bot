@@ -27,7 +27,7 @@ process.chdir(tmp);
 const PORT = 38123;
 Object.assign(process.env, {
     TOKEN: 'x', CLIENT_ID: '1', GUILD_ID: 'G1', ADMIN_ID: 'ADMIN', PANEL_PORT: String(PORT), PANEL_URL: `http://127.0.0.1:${PORT}`,
-    PANEL_DEV_AUTH: '1', NODE_ENV: 'test', PANEL_HOST: '127.0.0.1',
+    PANEL_DEV_AUTH: '1', NODE_ENV: 'test', PANEL_HOST: '127.0.0.1', NEWS_PUBLIC_URL: 'https://news.test/news',
     // Variables antiguas del estado del servidor: se importan una vez como servidor de juego.
     MOJANG_API_URL: 'http://127.0.0.1:38211', MOJANG_SESSION_URL: 'http://127.0.0.1:38211',
     SERVER_TYPE: 'MINECRAFT', MINECRAFT_SERVER_IP: '127.0.0.1', MINECRAFT_SERVER_PORT: '38200', MINECRAFT_API_PORT: '38201',
@@ -56,6 +56,8 @@ async function main() {
     const { WelcomeService, createWelcomeModule } = await import(src('modules/welcome'));
     const { ModerationService, createModerationModule } = await import(src('modules/moderation'));
     const { TicketsService, createTicketsModule } = await import(src('modules/tickets'));
+    const { NewsService, createNewsModule } = await import(src('modules/news'));
+    const { toPlainText } = await import(src('modules/news/text'));
     const { startFakeMinecraft, startFakeSpark, startFakeRcon, startFakeMojang } = await import('./fake-game-servers');
     const { startWebServer } = await import(src('web/server'));
     const { migrateLegacy, migrateReactions, migrateServers } = await import(src('core/migrateLegacy'));
@@ -104,6 +106,8 @@ async function main() {
     manager.register(createWelcomeModule(welcome));
     manager.register(createModerationModule(moderation));
     manager.register(createTicketsModule(tickets));
+    const news = new NewsService(client, db);
+    manager.register(createNewsModule(news));
     const fakeMc = startFakeMinecraft(38200, { online: 2, max: 20, players: ['Steve', 'Alex'], version: 'Paper 1.21.1', motd: 'MCKB Survival' });
     const fakeSpark = startFakeSpark(38201);
     migrateLegacy(db);
@@ -936,9 +940,72 @@ async function main() {
     ok('desactivar/activar la bandeja quita y pone el listener al instante');
 
     const st = (await call('GET', '/api/status')).json;
-    assert.equal(st.modules.length, 9);
+    assert.equal(st.modules.length, 10);
     assert.ok(st.stats.sent24h > 5);
     ok('estado general');
+
+    console.log('\nNoticias');
+    const names = { user: () => 'Steve_MC', role: () => 'Avisos', channel: () => 'general' };
+    assert.equal(
+        toPlainText('# Hola **<@1>** <@&2> <#3> <:kb:4> __a__ ~~b~~ ||c|| `*d*` \\*e\\* [web](https://x.com/a_b_c) **https://y.com/d_e_f**\n> cita snake_case_x', names, 'UTC'),
+        'Hola @Steve_MC @Avisos #general :kb: a b c *d* *e* web: https://x.com/a_b_c https://y.com/d_e_f\ncita snake_case_x',
+    );
+    ok('el markdown y las menciones se convierten en texto plano sin romper URLs ni nombres');
+
+    const none = new Collection<string, any>();
+    const newsMsg = (id: string, over: any = {}) => ({
+        id, channelId: 'C_NEWS', type: 0, reference: null, messageSnapshots: new Collection(), content: '', embeds: [],
+        attachments: none, stickers: none, poll: null, member: { displayName: 'KB Servers' },
+        author: { displayName: 'kb', displayAvatarURL: () => 'https://cdn.discordapp.com/avatars/1/a.png?size=64' },
+        createdAt: new Date(1_800_000_000_000 + Number(id) * 1000), createdTimestamp: 1_800_000_000_000 + Number(id) * 1000,
+        url: `https://discord.com/channels/G1/C_NEWS/${id}`, ...over,
+    });
+    const newsImg = { id: 'A1', url: 'http://127.0.0.1:38124/a.png?ex=1', contentType: 'image/png' };
+    mock.addChannel('C_NEWS', 'noticias');
+    mock.history.push(
+        newsMsg('1', { content: '**Hola**', attachments: new Collection([['A1', newsImg]]) }),
+        newsMsg('2', { type: 6, content: 'fijado' }),
+        newsMsg('3', { attachments: new Collection([['V', { id: 'V', url: 'http://127.0.0.1:38124/v.mp4', contentType: 'video/mp4' }]]) }),
+        newsMsg('4', { embeds: [{ data: { type: 'rich' }, title: 'Título', description: 'Texto' }, { data: { type: 'article' }, title: 'Preview' }] }),
+        newsMsg('5', { reference: { type: 1 }, messageSnapshots: new Collection([['S', { content: 'reenviado', embeds: [], attachments: none, stickers: none }]]) }),
+        newsMsg('6', { poll: {
+            question: { text: '¿Modpack?' }, expiresAt: null, resultsFinalized: true,
+            answers: new Collection([[1, { text: 'Create', emoji: { name: '⚙️', id: null }, voteCount: 12 }], [2, { text: 'Otro', emoji: { name: 'kb', id: '9' } }]]),
+        } }),
+    );
+    const put1 = await call('PUT', '/api/news', { channelId: 'C_NEWS' });
+    assert.equal(put1.status, 200);
+    assert.equal(put1.json.lastError, null);
+    const feedRes = await fetch(`${base}/news/latest.json`);
+    assert.equal(feedRes.status, 200);
+    assert.equal(feedRes.headers.get('cache-control'), 'no-cache');
+    const feed: any = await feedRes.json();
+    assert.equal(feed.version, 1);
+    assert.deepEqual(feed.messages.map((m: any) => m.id), ['6', '5', '4', '1']);
+    assert.equal(feed.messages[1].content, 'reenviado');
+    assert.equal(feed.messages[2].content, 'Título\n\nTexto');
+    assert.deepEqual(feed.messages[0].poll, {
+        question: '¿Modpack?', answers: [{ text: 'Create', emoji: '⚙️', votes: 12 }, { text: 'Otro', votes: 0 }], expiresAt: null, finalized: true,
+    });
+    const newsImage = feed.messages[3].images[0].url as string;
+    assert.ok(newsImage.startsWith('https://news.test/news/images/A1.'));
+    const imagePath = new URL(newsImage).pathname;
+    assert.equal((await fetch(base + imagePath)).status, 200);
+    ok('el canal se publica según el contrato y se sirve sin sesión');
+
+    mock.history.splice(0, 1);
+    await news.publishNow();
+    assert.equal((await fetch(base + imagePath)).status, 404);
+    assert.equal((await fetch(`${base}/news/nada`)).status, 404);
+    ok('al borrar un mensaje desaparece del fichero junto con su imagen');
+
+    const channelsFetch = client.channels.fetch;
+    client.channels.fetch = async () => { throw new Error('caído'); };
+    const newsFailed = await news.publishNow();
+    client.channels.fetch = channelsFetch;
+    assert.equal(newsFailed.lastError, 'caído');
+    assert.equal(newsFailed.feed.messages.length, 3);
+    ok('si Discord falla se conserva el último fichero');
 
     console.log(`\n✅ ${passed} comprobaciones superadas`);
     cdn.close();

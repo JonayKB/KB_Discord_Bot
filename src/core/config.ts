@@ -38,4 +38,9 @@ export const env = {
     },
 
     maxUploadMb: Number(process.env.MAX_UPLOAD_MB ?? 10),
+
+    news: {
+        /** URL pública de /news (sin barra final). Con https se sirven copias propias de las imágenes. */
+        publicUrl: (process.env.NEWS_PUBLIC_URL || `${(process.env.PANEL_URL ?? '').replace(/\/+$/, '')}/news`).replace(/\/+$/, ''),
+    },
 };
