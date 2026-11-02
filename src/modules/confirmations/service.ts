@@ -491,7 +491,7 @@ export class ConfirmationService {
         );
         if (campaign.allowDeny) {
             buttons.addComponents(
-                new ButtonBuilder().setCustomId(`cf:deny:${campaign.id}`).setLabel(campaign.denyLabel).setEmoji('❌').setStyle(ButtonStyle.Danger)
+                new ButtonBuilder().setCustomId(`cf:deny:${campaign.id}`).setLabel(campaign.denyLabel).setEmoji('✖️').setStyle(ButtonStyle.Danger)
             );
         }
         return {
