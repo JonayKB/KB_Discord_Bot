@@ -262,7 +262,7 @@ function CampaignEditor({ initial, guild, onClose, onSaved }: {
                     </div>
                     <div className="row" style={{ marginTop: 8 }}>
                         <span className="badge" style={{ background: '#4e5058', color: '#fff', padding: '6px 12px' }}>📝 {d.confirmLabel}</span>
-                        {d.allowDeny && <span className="badge" style={{ background: '#da373c', color: '#fff', padding: '6px 12px' }}>❌ {d.denyLabel}</span>}
+                        {d.allowDeny && <span className="badge" style={{ background: '#da373c', color: '#fff', padding: '6px 12px' }}>✖️ {d.denyLabel}</span>}
                     </div>
                 </div>
             </div>
