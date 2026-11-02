@@ -46,6 +46,8 @@ export async function uploadFiles(files: File[]): Promise<FileInfo[]> {
 
 // ───────────────────────────── Tipos compartidos ─────────────────────────────
 
+export interface Me { userId: string; username: string; avatar: string | null; access: 'owner' | 'staff' }
+
 export interface FileInfo {
     id: string;
     name: string;
@@ -78,6 +80,8 @@ export interface Msg {
     embed: EmbedData | null;
     source: string;
     sourceRef: string | null;
+    sentById: string | null;
+    sentByName: string | null;
     status: 'sent' | 'failed' | 'received';
     error: string | null;
     readAt: number | null;

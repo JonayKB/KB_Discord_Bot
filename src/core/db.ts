@@ -316,6 +316,10 @@ const MIGRATIONS: string[] = [
     CREATE UNIQUE INDEX ux_wl_uuid ON whitelist_entries (server_id, mc_uuid) WHERE mc_uuid IS NOT NULL AND status IN ('pending_add','active','pending_remove');
     CREATE INDEX idx_wl_user ON whitelist_entries (user_id);
     `,
+    /* v7: quién envió cada mensaje desde el panel */ `
+    ALTER TABLE messages ADD COLUMN sent_by_id TEXT;
+    ALTER TABLE messages ADD COLUMN sent_by_name TEXT;
+    `,
 ];
 
 export function openDb(file = path.join(DATA_DIR, 'bot.db')): DB {

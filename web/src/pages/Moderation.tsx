@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { del, get, post, put, type BanInfo, type LogEvent, type Member, type ModAction, type ModCase, type ModerationConfig, type ModuleInfo } from '../api';
+import { useIsOwner } from '../access';
 import { fmtDateTime, fmtDuration, fmtRelative } from '../format';
 import { useLive } from '../live';
 import { Avatar, Check, ChannelSelect, Empty, Icon, PageHead, Spinner, UserPicker, errMsg, rememberMember, toast, useConfirm, useGuildData, useMemberLabel } from '../ui';
@@ -29,6 +30,7 @@ const LOG_LABEL: Record<LogEvent, string> = {
 type Tab = 'act' | 'history' | 'bans' | 'log';
 
 export default function Moderation() {
+    const owner = useIsOwner();
     const [tab, setTab] = useState<Tab>('act');
     const [mod, setMod] = useState<ModuleInfo | null>(null);
     const [userId, setUserId] = useState<string | null>(null);
@@ -45,7 +47,7 @@ export default function Moderation() {
             {!running && <div className="alert" style={{ marginBottom: 16 }}>El módulo <b>Moderación</b> está desactivado: no se registra nada ni se pueden aplicar sanciones. Actívalo en <a href="#/modules">Módulos</a>.</div>}
 
             <div className="seg" style={{ marginBottom: 16 }} role="tablist">
-                {([['act', 'Sancionar'], ['history', 'Historial'], ['bans', 'Baneados'], ['log', 'Registro']] as Array<[Tab, string]>).map(([id, l]) => (
+                {([['act', 'Sancionar'], ['history', 'Historial'], ['bans', 'Baneados'], ...(owner ? [['log', 'Registro']] : [])] as Array<[Tab, string]>).map(([id, l]) => (
                     <button key={id} type="button" role="tab" aria-selected={tab === id} className={tab === id ? 'on' : ''} onClick={() => setTab(id)}>{l}</button>
                 ))}
             </div>
@@ -179,6 +181,7 @@ function ActTab({ running, userId, setUserId }: { running: boolean; userId: stri
 
 function CaseList({ cases, showUser, onChanged, onOpenUser }: { cases: ModCase[]; showUser: boolean; onChanged: () => void; onOpenUser?: (id: string) => void }) {
     const confirm = useConfirm();
+    const owner = useIsOwner();
     const remove = async (c: ModCase) => {
         if (!(await confirm({ title: `Borrar caso #${c.id}`, message: 'Solo se borra del historial del panel; no deshace la sanción en Discord.', confirmLabel: 'Borrar', danger: true }))) return;
         try { await del(`/moderation/cases/${c.id}`); onChanged(); } catch (e) { toast.error(errMsg(e)); }
@@ -203,7 +206,7 @@ function CaseList({ cases, showUser, onChanged, onOpenUser }: { cases: ModCase[]
                             </td>
                             <td className="small">{c.source === 'discord' ? <span className="muted" title="Se hizo directamente en Discord">En Discord</span> : c.moderatorName}</td>
                             <td className="small muted" title={fmtDateTime(c.createdAt)}>{fmtRelative(c.createdAt)}</td>
-                            <td><button className="btn sm ghost icon" onClick={() => remove(c)} aria-label={`Borrar caso ${c.id}`}><Icon name="trash" size={14} /></button></td>
+                            <td>{owner && <button className="btn sm ghost icon" onClick={() => remove(c)} aria-label={`Borrar caso ${c.id}`}><Icon name="trash" size={14} /></button>}</td>
                         </tr>
                     ))}
                 </tbody>

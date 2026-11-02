@@ -102,7 +102,7 @@ export function createTicketsModule(service: TicketsService): BotModule {
         const content = str(req.body?.content, 'content', { max: 1900 });
         const fileIds = strArray(req.body?.fileIds, 'fileIds', 10);
         if (!content.trim() && !fileIds.length) throw new HttpError(400, 'Escribe algo o adjunta un archivo.');
-        res.status(201).json(await service.reply(id(req.params.id), me(req), content, fileIds));
+        res.status(201).json(await service.reply(id(req.params.id), me(req), content, fileIds, { autoClaim: req.session!.access === 'staff' }));
     }));
 
     router.post('/:id/claim', asyncRoute(async (req, res) => res.json(await service.claim(id(req.params.id), me(req)))));

@@ -3,6 +3,7 @@ import {
     del, get, post, put,
     type Category, type ModuleInfo, type Ticket, type TicketButtonStyle, type TicketMessage, type TicketPanel, type TicketQuestion, type TicketType, type TicketsConfig,
 } from '../api';
+import { useIsOwner } from '../access';
 import { fmtDateTime, fmtRelative, fmtTime } from '../format';
 import { useLive } from '../live';
 import { go } from '../nav';
@@ -16,12 +17,15 @@ const IMG = /\.(png|jpe?g|gif|webp)(\?|$)/i;
 
 /** #/tickets → bandeja · #/tickets/<id> → ticket · #/tickets/panels · #/tickets/settings */
 export default function Tickets({ sub }: { sub?: string }) {
-    if (sub === 'panels') return <PanelsPage />;
-    if (sub === 'settings') return <SettingsPage />;
+    const owner = useIsOwner();
+    if (sub === 'panels') return owner ? <PanelsPage /> : <TicketsInbox ticketId={null} />;
+    if (sub === 'settings') return owner ? <SettingsPage /> : <TicketsInbox ticketId={null} />;
     return <TicketsInbox ticketId={sub ? Number(sub) : null} />;
 }
 
 function SubNav({ active }: { active: 'inbox' | 'panels' | 'settings' }) {
+    const owner = useIsOwner();
+    if (!owner) return null;
     return (
         <div className="seg" role="tablist">
             {([['inbox', 'Tickets', 'tickets'], ['panels', 'Paneles', 'tickets/panels'], ['settings', 'Ajustes', 'tickets/settings']] as const).map(([id, l, path]) => (
@@ -42,6 +46,7 @@ function useModuleRunning() {
 
 function TicketsInbox({ ticketId }: { ticketId: number | null }) {
     const confirm = useConfirm();
+    const owner = useIsOwner();
     const running = useModuleRunning();
     const [status, setStatus] = useState<'open' | 'closed' | ''>('open');
     const [q, setQ] = useState('');
@@ -162,7 +167,7 @@ function TicketsInbox({ ticketId }: { ticketId: number | null }) {
                                     {!ticket.claimedById && <button className="btn sm" disabled={!running} onClick={claim}>🙋 Atender</button>}
                                     <button className="btn sm danger" disabled={!running} onClick={() => setClosing(true)}>🔒 Cerrar</button>
                                 </>
-                            ) : <button className="btn sm danger" onClick={remove} aria-label="Borrar del historial"><Icon name="trash" size={14} /></button>}
+                            ) : owner && <button className="btn sm danger" onClick={remove} aria-label="Borrar del historial"><Icon name="trash" size={14} /></button>}
                         </div>
                         <dl className="ticket-info">
                             <div><dt>Abierto:</dt><dd>{fmtDateTime(ticket.createdAt)}</dd></div>

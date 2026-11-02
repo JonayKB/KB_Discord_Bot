@@ -1,21 +1,23 @@
 import { useCallback, useEffect, useState } from 'react';
 import { get, post, type Job, type Msg, type Status } from '../api';
+import { useIsOwner } from '../access';
 import { fmtDuration, fmtRelative, fmtDateTime, SOURCE_LABEL } from '../format';
 import { useLive } from '../live';
 import { Avatar, Empty, PageHead, Spinner, Switch, errMsg, toast } from '../ui';
 import { go } from '../nav';
 
 export default function Dashboard() {
+    const owner = useIsOwner();
     const [status, setStatus] = useState<Status | null>(null);
     const [jobs, setJobs] = useState<Job[]>([]);
     const [recent, setRecent] = useState<Msg[]>([]);
     const [error, setError] = useState<string | null>(null);
 
     const load = useCallback(() => {
-        Promise.all([get<Status>('/status'), get<Job[]>('/scheduler/jobs'), get<Msg[]>('/messages/history?limit=8')])
+        Promise.all([get<Status>('/status'), owner ? get<Job[]>('/scheduler/jobs') : Promise.resolve([]), get<Msg[]>('/messages/history?limit=8')])
             .then(([s, j, r]) => { setStatus(s); setJobs(j); setRecent(r); setError(null); })
             .catch(e => setError(errMsg(e)));
-    }, []);
+    }, [owner]);
 
     useEffect(() => { load(); const t = setInterval(load, 30_000); return () => clearInterval(t); }, [load]);
     useLive(e => { if (['message:new', 'job:updated', 'modules:changed'].includes(e.type)) load(); });
@@ -43,11 +45,11 @@ export default function Dashboard() {
                 <div className="tile link" onClick={() => go('history')}><div className="label">Fallidos (24 h)</div><div className="value" style={{ color: s.failed24h ? 'var(--danger)' : undefined }}>{s.failed24h}</div></div>
                 <div className="tile link" onClick={() => go('inbox')}><div className="label">Recibidos (24 h)</div><div className="value">{s.received24h}</div></div>
                 <div className="tile link" onClick={() => go('inbox')}><div className="label">Sin leer</div><div className="value" style={{ color: s.unread ? 'var(--accent)' : undefined }}>{s.unread}</div></div>
-                <div className="tile link" onClick={() => go('scheduler')}><div className="label">Tareas activas</div><div className="value">{s.activeJobs}</div></div>
-                <div className="tile link" onClick={() => go('confirmations')}><div className="label">Confirmados</div><div className="value">{s.confirmed}</div></div>
+                {owner && <div className="tile link" onClick={() => go('scheduler')}><div className="label">Tareas activas</div><div className="value">{s.activeJobs}</div></div>}
+                {owner && <div className="tile link" onClick={() => go('confirmations')}><div className="label">Confirmados</div><div className="value">{s.confirmed}</div></div>}
             </div>
 
-            <div className="grid cols-2">
+            {owner && <div className="grid cols-2">
                 <div className="card">
                     <div className="card-head"><h2>Próximos envíos</h2><button className="btn sm" onClick={() => go('scheduler')}>Gestionar</button></div>
                     {upcoming.length === 0 ? <Empty title="Nada programado">Crea una tarea en Programación.</Empty> : (
@@ -73,7 +75,7 @@ export default function Dashboard() {
                         ))}
                     </div>
                 </div>
-            </div>
+            </div>}
 
             <div className="card tight">
                 <div className="card-head" style={{ padding: '16px 18px 0' }}><h2>Actividad reciente</h2><button className="btn sm" onClick={() => go('history')}>Ver historial</button></div>

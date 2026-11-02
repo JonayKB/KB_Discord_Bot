@@ -502,16 +502,21 @@ export class TicketsService {
     }
 
     /** Responde desde el panel: el mensaje sale en el canal del ticket, enviado por el bot. */
-    async reply(id: number, by: { id: string; name: string }, content: string, fileIds: string[]): Promise<TicketMessage> {
+    async reply(id: number, by: { id: string; name: string }, content: string, fileIds: string[], opts: { autoClaim?: boolean } = {}): Promise<TicketMessage> {
         const t = this.require(id);
         if (t.status !== 'open' || !t.channelId) throw new HttpError(400, 'El ticket está cerrado.');
         const text = content.trim() ? `**${by.name}:** ${content.trim()}` : '';
-        const res = await this.messages.sendToChannel(t.channelId, { content: text, fileIds }, { source: 'ticket', sourceRef: String(id) });
+        const res = await this.messages.sendToChannel(t.channelId, { content: text, fileIds }, { source: 'ticket', sourceRef: String(id), actor: by });
         if (res.status === 'failed') throw new HttpError(400, `No se pudo enviar: ${res.error}`);
-        return this.addMessage(id, {
+        const message = this.addMessage(id, {
             discordId: res.discordId, authorId: by.id, authorName: by.name, authorAvatar: null, kind: 'panel',
             content: content.trim(), attachments: getFiles(this.db, fileIds).map(f => ({ name: f.name, url: toFileInfo(f).url })),
         });
+        // Un ticket que ya atiende otra persona no cambia de manos.
+        if (opts.autoClaim && !t.claimedById) {
+            await this.claim(id, by).catch(err => logger.warn(`No se pudo marcar el ticket como atendido: ${(err as Error).message}`));
+        }
+        return message;
     }
 
     async close(id: number, by: { id: string | null; name: string }, reason: string | null, opts: { channelGone?: boolean } = {}): Promise<Ticket> {

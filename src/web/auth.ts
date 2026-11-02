@@ -6,6 +6,7 @@ import type { DB } from '../core/db';
 import { env } from '../core/config';
 import { asyncRoute } from '../core/http';
 import { Logger } from '../utils/Logger';
+import { resolveAccess, type PanelAccess } from './access';
 
 const logger = new Logger('PanelAuth');
 
@@ -21,7 +22,7 @@ export interface SessionUser {
 
 declare module 'express-serve-static-core' {
     interface Request {
-        session?: SessionUser;
+        session?: SessionUser & { access: PanelAccess };
     }
 }
 
@@ -67,15 +68,6 @@ function createSession(db: DB, user: SessionUser): string {
 
 export function purgeExpiredSessions(db: DB): void {
     db.prepare('DELETE FROM sessions WHERE expires_at < ?').run(Date.now());
-}
-
-/** ¿Este usuario de Discord puede entrar al panel? */
-async function isAllowed(client: Client, userId: string): Promise<boolean> {
-    if (env.panel.adminIds.includes(userId)) return true;
-    if (!env.panel.roleIds.length) return false;
-    const guild = client.guilds.cache.get(env.guildId);
-    const member = await guild?.members.fetch(userId).catch(() => null);
-    return !!member && env.panel.roleIds.some(r => member.roles.cache.has(r));
 }
 
 function loginPage(message: string): string {
@@ -132,7 +124,7 @@ export function createAuthRouter(db: DB, client: Client): Router {
             if (!meRes.ok) throw new Error(`users/@me HTTP ${meRes.status}`);
             const me = (await meRes.json()) as { id: string; username: string; global_name?: string; avatar?: string | null };
 
-            if (!(await isAllowed(client, me.id))) {
+            if (!(await resolveAccess(client, db, me.id))) {
                 logger.warn(`🚫 Acceso denegado al panel para ${me.username} (${me.id})`);
                 res.status(403).send(loginPage('Tu cuenta de Discord no tiene acceso a este panel.'));
                 return;
@@ -174,16 +166,18 @@ export function createAuthRouter(db: DB, client: Client): Router {
     return router;
 }
 
-export function requireAuth(db: DB) {
-    return (req: Request, res: Response, next: NextFunction): void => {
+/** Comprueba la sesión y el acceso en cada petición: quitar el rol en Discord corta el acceso al momento. */
+export function requireAuth(db: DB, client: Client) {
+    return asyncRoute(async (req: Request, res: Response, next: NextFunction) => {
         const session = sessionFromRequest(db, req);
-        if (!session) {
+        const access = session ? await resolveAccess(client, db, session.userId) : null;
+        if (!session || !access) {
             res.status(401).json({ error: 'No has iniciado sesión' });
             return;
         }
-        req.session = session;
+        req.session = { ...session, access };
         next();
-    };
+    });
 }
 
 /**

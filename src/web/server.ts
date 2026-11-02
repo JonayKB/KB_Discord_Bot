@@ -11,10 +11,11 @@ import { env } from '../core/config';
 import type { DB } from '../core/db';
 import { NEWS_DIR, UPLOADS_DIR } from '../core/db';
 import { getFile, isInlineImage, registerFile, safeName, toFileInfo } from '../core/files';
-import { BotError, HttpError, asyncRoute, bool } from '../core/http';
+import { BotError, HttpError, asyncRoute, bool, strArray } from '../core/http';
 import { getLogs } from '../core/logs';
 import type { ModuleManager } from '../core/module';
 import { Logger, type LogLevel } from '../utils/Logger';
+import { STAFF_EVENTS, getStaffRoleIds, requireStaffRoute, resolveAccess, setStaffRoleIds, type PanelAccess } from './access';
 import { createAuthRouter, purgeExpiredSessions, requireAuth, requireCsrfHeader, sessionFromRequest } from './auth';
 
 const logger = new Logger('Panel');
@@ -56,11 +57,32 @@ export function startWebServer({ client, db, manager }: WebDeps): http.Server {
 
     // ── API (requiere sesión) ──
     const api = Router();
-    api.use(requireAuth(db));
+    api.use(requireAuth(db, client));
     api.use(requireCsrfHeader);
+    api.use(requireStaffRoute);
     api.use(express.json({ limit: '1mb' }));
 
     api.get('/me', (req, res) => res.json(req.session));
+
+    // ── Acceso al panel: roles de Discord con permisos de administrador (solo propietario) ──
+    api.get('/access', (_req, res) => res.json({ roleIds: getStaffRoleIds(db) }));
+    api.put('/access', (req, res) => {
+        const guild = client.guilds.cache.get(env.guildId);
+        if (!guild) throw new HttpError(503, 'El bot aún no ha cargado el servidor.');
+        const roleIds = strArray(req.body?.roleIds, 'roleIds', 50);
+        if (roleIds.some(id => id === guild.id || !guild.roles.cache.has(id))) throw new HttpError(400, 'Alguno de los roles no es válido.');
+        setStaffRoleIds(db, roleIds);
+        logger.info(`🔑 ${req.session!.username} ha cambiado los roles de administrador del panel`);
+        res.json({ roleIds: getStaffRoleIds(db) });
+    });
+
+    // Un administrador no puede sancionar a quien también tiene acceso al panel.
+    api.post('/moderation/actions', asyncRoute(async (req, _res, next) => {
+        if (req.session!.access === 'staff' && await resolveAccess(client, db, String(req.body?.userId))) {
+            throw new HttpError(403, 'No puedes sancionar a alguien con acceso al panel.');
+        }
+        next();
+    }));
 
     api.get('/status', (_req, res) => {
         const guild = client.guilds.cache.get(env.guildId);
@@ -222,16 +244,23 @@ export function startWebServer({ client, db, manager }: WebDeps): http.Server {
     const server = http.createServer(app);
     const wss = new WebSocketServer({ noServer: true });
 
-    server.on('upgrade', (req, socket, head) => {
+    const sockets = new WeakMap<WebSocket, { userId: string; access: PanelAccess }>();
+
+    server.on('upgrade', async (req, socket, head) => {
         const url = new URL(req.url ?? '/', 'http://localhost');
         const origin = req.headers.origin;
         const sameOrigin = !origin || (() => { try { return new URL(origin).host === req.headers.host; } catch { return false; } })();
-        if (url.pathname !== '/ws' || !sameOrigin || !sessionFromRequest(db, req)) {
+        const session = url.pathname === '/ws' && sameOrigin ? sessionFromRequest(db, req) : undefined;
+        const access = session ? await resolveAccess(client, db, session.userId).catch(() => null) : null;
+        if (!session || !access) {
             socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
             socket.destroy();
             return;
         }
-        wss.handleUpgrade(req, socket, head, ws => wss.emit('connection', ws, req));
+        wss.handleUpgrade(req, socket, head, ws => {
+            sockets.set(ws, { userId: session.userId, access });
+            wss.emit('connection', ws, req);
+        });
     });
 
     const alive = new WeakSet<WebSocket>();
@@ -243,7 +272,10 @@ export function startWebServer({ client, db, manager }: WebDeps): http.Server {
 
     const onEvent = (e: BusEvent) => {
         const data = JSON.stringify(e);
-        for (const ws of wss.clients) if (ws.readyState === ws.OPEN) ws.send(data);
+        for (const ws of wss.clients) {
+            if (ws.readyState !== ws.OPEN) continue;
+            if (sockets.get(ws)?.access === 'owner' || STAFF_EVENTS.has(e.type)) ws.send(data);
+        }
     };
     bus.on('event', onEvent);
 
@@ -252,6 +284,13 @@ export function startWebServer({ client, db, manager }: WebDeps): http.Server {
             if (!alive.has(ws)) { ws.terminate(); continue; }
             alive.delete(ws);
             ws.ping();
+            const info = sockets.get(ws);
+            if (info) {
+                void resolveAccess(client, db, info.userId).then(access => {
+                    if (access) info.access = access;
+                    else ws.terminate();
+                }).catch(() => ws.terminate());
+            }
         }
     }, 30_000);
     heartbeat.unref();

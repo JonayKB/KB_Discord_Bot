@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { get, post, put, type Msg } from '../api';
+import { useIsOwner } from '../access';
 import { fmtDateTime, fmtRelative, fmtTime, SOURCE_LABEL } from '../format';
 import { useLive } from '../live';
 import { go } from '../nav';
@@ -10,6 +11,7 @@ interface Conversation { userId: string; userTag: string | null; userAvatar: str
 const dayLabel = (ts: number) => new Date(ts).toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' });
 
 export default function Inbox({ userId }: { userId?: string }) {
+    const owner = useIsOwner();
     const [convs, setConvs] = useState<Conversation[]>([]);
     const [filter, setFilter] = useState('');
     const [loading, setLoading] = useState(true);
@@ -100,7 +102,7 @@ export default function Inbox({ userId }: { userId?: string }) {
                 <div className="head">
                     <div className="row between"><h2>Bandeja</h2><button className="btn sm primary" onClick={() => setNewOpen(true)}><Icon name="plus" size={14} /> Nueva</button></div>
                     <input type="search" placeholder="Buscar conversación…" value={filter} onChange={e => setFilter(e.target.value)} />
-                    {forward !== null && (
+                    {owner && forward !== null && (
                         <label className="row small muted" style={{ justifyContent: 'space-between', cursor: 'pointer' }}>
                             <span title="Además de guardarlos aquí, el bot te reenvía cada MD por Discord con un botón Responder">Reenviar MD recibidos al admin por Discord</span>
                             <Switch checked={forward} onChange={toggleForward} label="Reenviar al admin" />
@@ -181,6 +183,7 @@ function Bubble({ m }: { m: Msg }) {
                 <Attachments files={m.files} />
                 <div className="meta">
                     {auto && <span>🤖 {SOURCE_LABEL[m.source] ?? m.source} ·</span>}
+                    {m.sentByName && <span>{m.sentByName} ·</span>}
                     <span>{fmtTime(m.createdAt)}</span>
                     {m.status === 'failed' && <span>· ❌ {m.error}</span>}
                 </div>
