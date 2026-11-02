@@ -87,6 +87,8 @@ code, .mono { font-family: var(--mono); font-size: 12.5px; }
 .grid.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .grid.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .grid.tiles { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.grid.compose-layout { grid-template-columns: minmax(0, 1fr) 320px; align-items: start; }
+.compose-templates { position: sticky; top: 0; }
 
 @media (max-width: 860px) {
   .app { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
@@ -95,7 +97,8 @@ code, .mono { font-family: var(--mono); font-size: 12.5px; }
   .nav { display: flex; gap: 2px; }
   .nav a { white-space: nowrap; padding: 8px 12px; }
   .main { padding: 18px 16px 60px; }
-  .grid.cols-2, .grid.cols-3 { grid-template-columns: 1fr; }
+  .grid.cols-2, .grid.cols-3, .grid.compose-layout { grid-template-columns: minmax(0, 1fr); }
+  .compose-templates { position: static; }
 }
 
 /* ───── Tarjetas ───── */
