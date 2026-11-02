@@ -145,7 +145,7 @@ export default function Compose() {
                 </div>
             )}
 
-            <div className="grid" style={{ gridTemplateColumns: 'minmax(0,1fr) 320px', alignItems: 'start' }}>
+            <div className="grid compose-layout">
                 <div className="stack">
                     <div className="card stack">
                         <h2>1 · Destinatario</h2>
@@ -176,7 +176,7 @@ export default function Compose() {
                     </div>
                 </div>
 
-                <div className="card stack" style={{ position: 'sticky', top: 0 }}>
+                <div className="card stack compose-templates">
                     <h2>Plantillas</h2>
                     {templates.length === 0 ? <Empty title="Sin plantillas">Guarda un mensaje para reutilizarlo o programarlo.</Empty> : (
                         <div className="stack" style={{ gap: 8 }}>
