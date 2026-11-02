@@ -39,7 +39,13 @@ El flujo de despliegue de GitHub Actions no cambia: hace `git pull`, `npm i` y `
 1. [Developer Portal](https://discord.com/developers/applications) → tu aplicación → **OAuth2**.
 2. Copia el **Client Secret** a `DISCORD_CLIENT_SECRET` en el `.env`.
 3. En **Redirects** añade `<PANEL_URL>/auth/callback` (p. ej. `http://localhost:3000/auth/callback`).
-4. Entra en `PANEL_URL`. Solo pasan los IDs de `PANEL_ADMIN_IDS` (por defecto `ADMIN_ID`) y, opcionalmente, quien tenga un rol de `PANEL_ROLE_IDS`.
+4. Entra en `PANEL_URL`. Solo pasan los IDs de `PANEL_ADMIN_IDS` (por defecto `ADMIN_ID`) y, opcionalmente, quien tenga un rol de `PANEL_ROLE_IDS`, todos con acceso total.
+
+### Roles de administrador
+
+En la sección **Acceso** del panel eliges qué roles de Discord entran con permisos limitados: Resumen, Enviar mensaje, Bandeja, Historial, Moderación, Tickets y Registros. No pueden tocar configuraciones, plantillas, módulos ni borrar registros, y tampoco sancionar a quien tenga acceso al panel. Los roles se comprueban en cada petición, así que al quitar el rol se pierde el acceso al momento.
+
+Cuando un administrador responde desde el panel a un ticket sin atender, queda como quien lo atiende. El Historial muestra quién envió cada mensaje desde el panel.
 
 ### ¿Cómo accedo al panel desde fuera del servidor?
 

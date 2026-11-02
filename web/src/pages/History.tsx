@@ -1,14 +1,24 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { del, get, type Msg } from '../api';
+import { useIsOwner } from '../access';
 import { fmtDateTime, SOURCE_LABEL } from '../format';
 import { useLive } from '../live';
 import { go } from '../nav';
 import { Attachments, Avatar, Empty, PageHead, Spinner, errMsg, toast, useConfirm } from '../ui';
 
 const PAGE = 50;
+const HUMAN_SOURCES = ['manual', 'reply', 'ticket'];
+
+function SentBy({ m }: { m: Msg }) {
+    if (m.sentByName) return <b title={m.sentById ?? undefined}>{m.sentByName}</b>;
+    if (m.direction === 'in') return <span className="muted">—</span>;
+    if (HUMAN_SOURCES.includes(m.source)) return <span className="muted" title="Se envió antes de que el panel guardara el autor">Sin registrar</span>;
+    return <span className="muted">Bot</span>;
+}
 
 export default function History() {
     const confirm = useConfirm();
+    const owner = useIsOwner();
     const [rows, setRows] = useState<Msg[]>([]);
     const [loading, setLoading] = useState(true);
     const [more, setMore] = useState(false);
@@ -58,7 +68,7 @@ export default function History() {
             <PageHead title="Historial" subtitle="Todos los mensajes enviados y recibidos por el bot." />
             <div className="card" style={{ marginBottom: 16 }}>
                 <div className="row wrap">
-                    <input type="search" style={{ maxWidth: 280 }} placeholder="Buscar texto o usuario…" value={q} onChange={e => setQ(e.target.value)} />
+                    <input type="search" style={{ maxWidth: 280 }} placeholder="Buscar texto, usuario o autor…" value={q} onChange={e => setQ(e.target.value)} />
                     <select style={{ width: 'auto' }} value={direction} onChange={e => setDirection(e.target.value)}><option value="">Enviados y recibidos</option><option value="out">Solo enviados</option><option value="in">Solo recibidos</option></select>
                     <select style={{ width: 'auto' }} value={kind} onChange={e => setKind(e.target.value)}><option value="">MD y canales</option><option value="dm">Solo MD</option><option value="channel">Solo canales</option></select>
                     <select style={{ width: 'auto' }} value={source} onChange={e => setSource(e.target.value)}>
@@ -72,7 +82,7 @@ export default function History() {
             <div className="card tight">
                 {loading ? <div className="empty"><Spinner /></div> : rows.length === 0 ? <Empty title="Sin resultados">Prueba con otros filtros.</Empty> : (
                     <div className="table-wrap"><table>
-                        <thead><tr><th>Fecha</th><th>Dirección</th><th>Usuario / canal</th><th>Mensaje</th><th>Origen</th><th>Estado</th></tr></thead>
+                        <thead><tr><th>Fecha</th><th>Dirección</th><th>Usuario / canal</th><th>Mensaje</th><th>Enviado por</th><th>Origen</th><th>Estado</th></tr></thead>
                         <tbody>
                             {rows.map(m => (
                                 <Fragment key={m.id}>
@@ -81,11 +91,12 @@ export default function History() {
                                         <td className="shrink"><span className={`badge ${m.direction === 'in' ? 'accent' : ''}`}>{m.direction === 'in' ? '↓ Recibido' : '↑ Enviado'}</span></td>
                                         <td className="shrink"><div className="row"><Avatar src={m.userAvatar} name={m.userTag ?? m.channelName} size="sm" /><b>{m.kind === 'channel' ? `#${m.channelName ?? m.channelId}` : (m.userTag ?? m.userId)}</b></div></td>
                                         <td><span className="ellipsis" style={{ display: 'block', maxWidth: 380 }}>{m.content || (m.embed?.title ? `📋 ${m.embed.title}` : m.files.length ? '📎 Adjunto' : '—')}{m.files.length > 0 && m.content ? ' 📎' : ''}</span></td>
+                                        <td className="shrink"><SentBy m={m} /></td>
                                         <td className="shrink"><span className="badge">{SOURCE_LABEL[m.source] ?? m.source}</span></td>
                                         <td className="shrink">{m.status === 'failed' ? <span className="badge danger">Fallido</span> : m.status === 'received' ? <span className="badge accent">Recibido</span> : <span className="badge ok">Enviado</span>}</td>
                                     </tr>
                                     {open === m.id && (
-                                        <tr className="expand"><td colSpan={6}>
+                                        <tr className="expand"><td colSpan={7}>
                                             <div className="stack" style={{ gap: 10 }}>
                                                 {m.content && <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{m.content}</div>}
                                                 {m.embed && <div className="card" style={{ borderLeft: `4px solid ${m.embed.color ?? 'var(--accent)'}`, padding: 12 }}>{m.embed.title && <b>{m.embed.title}</b>}<div style={{ whiteSpace: 'pre-wrap' }}>{m.embed.description}</div>{m.embed.footer && <div className="muted small">{m.embed.footer}</div>}</div>}
@@ -93,7 +104,7 @@ export default function History() {
                                                 {m.error && <div className="alert danger">{m.error}</div>}
                                                 <div className="row wrap">
                                                     {m.kind === 'dm' && m.userId && <button className="btn sm" onClick={() => go(`inbox/${m.userId}`)}>Ver conversación</button>}
-                                                    <button className="btn sm danger" onClick={() => remove(m)}>Quitar del historial</button>
+                                                    {owner && <button className="btn sm danger" onClick={() => remove(m)}>Quitar del historial</button>}
                                                     <span className="muted small">ID {m.id}{m.sourceRef ? ` · ref ${m.sourceRef}` : ''}</span>
                                                 </div>
                                             </div>

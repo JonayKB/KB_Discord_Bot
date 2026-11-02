@@ -37,6 +37,8 @@ export type MessageSource = 'manual' | 'reply' | 'schedule' | 'campaign' | 'welc
 export interface SendMeta {
     source: MessageSource;
     sourceRef?: string;
+    /** Persona que lo envió (panel o Discord); sin esto, lo ha enviado el bot por su cuenta. */
+    actor?: { id: string; name: string };
 }
 
 /** Opciones extra que no se guardan en el historial (botones, etc.). */
@@ -67,6 +69,8 @@ export interface MessageRecord {
     embed: EmbedPayload | null;
     source: string;
     sourceRef: string | null;
+    sentById: string | null;
+    sentByName: string | null;
     status: 'sent' | 'failed' | 'received';
     error: string | null;
     readAt: number | null;
@@ -88,6 +92,8 @@ interface MessageRow {
     embed_json: string | null;
     source: string;
     source_ref: string | null;
+    sent_by_id: string | null;
+    sent_by_name: string | null;
     status: 'sent' | 'failed' | 'received';
     error: string | null;
     read_at: number | null;
@@ -254,7 +260,7 @@ export class MessagesService {
         if (q.userId) { where.push('user_id = @userId'); params.userId = q.userId; }
         if (q.before) { where.push('id < @before'); params.before = q.before; }
         if (q.q) {
-            where.push("(content LIKE @q ESCAPE '\\' OR user_tag LIKE @q ESCAPE '\\' OR channel_name LIKE @q ESCAPE '\\')");
+            where.push("(content LIKE @q ESCAPE '\\' OR user_tag LIKE @q ESCAPE '\\' OR channel_name LIKE @q ESCAPE '\\' OR sent_by_name LIKE @q ESCAPE '\\')");
             params.q = `%${q.q.replace(/[\\%_]/g, m => `\\${m}`)}%`;
         }
         params.limit = Math.min(Math.max(q.limit ?? 50, 1), 200);
@@ -296,9 +302,9 @@ export class MessagesService {
         const insert = this.db.transaction(() => {
             const res = this.db.prepare(`
                 INSERT INTO messages (direction, kind, user_id, user_tag, user_avatar, channel_id, channel_name, discord_id,
-                                      content, embed_json, source, source_ref, status, error, created_at)
+                                      content, embed_json, source, source_ref, sent_by_id, sent_by_name, status, error, created_at)
                 VALUES (@direction, @kind, @userId, @userTag, @userAvatar, @channelId, @channelName, @discordId,
-                        @content, @embed, @source, @sourceRef, @status, @error, @createdAt)
+                        @content, @embed, @source, @sourceRef, @sentById, @sentByName, @status, @error, @createdAt)
             `).run({
                 direction: input.direction,
                 kind: input.kind,
@@ -312,6 +318,8 @@ export class MessagesService {
                 embed: input.payload.embed ? JSON.stringify(input.payload.embed) : null,
                 source: input.meta.source,
                 sourceRef: input.meta.sourceRef ?? null,
+                sentById: input.meta.actor?.id ?? null,
+                sentByName: input.meta.actor?.name ?? null,
                 status: input.status,
                 error: input.error ?? null,
                 createdAt: Date.now(),
@@ -344,6 +352,8 @@ export class MessagesService {
             embed: parseJson<EmbedPayload | null>(r.embed_json, null),
             source: r.source,
             sourceRef: r.source_ref,
+            sentById: r.sent_by_id,
+            sentByName: r.sent_by_name,
             status: r.status,
             error: r.error,
             readAt: r.read_at,

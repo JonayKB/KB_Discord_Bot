@@ -41,7 +41,10 @@ export function createMessagesModule(service: MessagesService, db: DB): BotModul
     router.post('/send', asyncRoute(async (req, res) => {
         const target = parseTarget(req.body?.target);
         const payload = parsePayload(req.body?.payload);
-        const meta = { source: 'manual' as MessageSource };
+        const meta = {
+            source: 'manual' as MessageSource,
+            actor: { id: req.session!.userId, name: req.session!.username },
+        };
 
         if (target.type === 'channel') {
             res.json(await service.sendToChannel(target.id, payload, meta));

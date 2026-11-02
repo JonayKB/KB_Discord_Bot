@@ -122,7 +122,10 @@ export function createInboxModule(inbox: InboxService, messages: MessagesService
         const content = str(req.body?.content, 'content', { max: 2000 });
         const fileIds = strArray(req.body?.fileIds, 'fileIds', 10);
         if (!content.trim() && !fileIds.length) throw new HttpError(400, 'Escribe algo o adjunta una imagen.');
-        const rec = await messages.sendToUser(String(req.params.userId), { content, fileIds }, { source: 'reply' });
+        const rec = await messages.sendToUser(String(req.params.userId), { content, fileIds }, {
+            source: 'reply',
+            actor: { id: req.session!.userId, name: req.session!.username },
+        });
         if (rec.status === 'failed') throw new HttpError(502, rec.error ?? 'No se pudo enviar');
         inbox.markRead(String(req.params.userId));
         res.json(rec);
@@ -217,7 +220,10 @@ export function createInboxModule(inbox: InboxService, messages: MessagesService
                     const text = interaction.fields.getTextInputValue('response_input');
                     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
                     try {
-                        const rec = await messages.sendToUser(userId, { content: `📩 Respuesta del Administrador: ${text}` }, { source: 'reply' });
+                        const rec = await messages.sendToUser(userId, { content: `📩 Respuesta del Administrador: ${text}` }, {
+                            source: 'reply',
+                            actor: { id: interaction.user.id, name: interaction.user.globalName ?? interaction.user.username },
+                        });
                         await interaction.editReply(rec.status === 'sent' ? '✅ Mensaje enviado al usuario' : `❌ No se pudo enviar: ${rec.error}`);
                     } catch (err) {
                         await interaction.editReply(`❌ No se pudo enviar: ${friendlyDiscordError(err)}`);

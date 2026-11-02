@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useHash } from './nav';
-import { get } from './api';
+import { get, type Me } from './api';
+import { AccessContext } from './access';
 import { startLive, stopLive, useLive, useLiveConnected } from './live';
 import { Avatar, ConfirmProvider, Icon, Spinner, Toasts } from './ui';
 import Dashboard from './pages/Dashboard';
@@ -17,8 +18,7 @@ import Tickets from './pages/Tickets';
 import News from './pages/News';
 import Modules from './pages/Modules';
 import Logs from './pages/Logs';
-
-interface Me { userId: string; username: string; avatar: string | null }
+import Access from './pages/Access';
 
 const NAV = [
     ['dashboard', 'Resumen', 'home'],
@@ -35,7 +35,10 @@ const NAV = [
     ['news', 'Noticias', 'list'],
     ['modules', 'Módulos', 'grid'],
     ['logs', 'Registros', 'terminal'],
+    ['access', 'Acceso', 'settings'],
 ] as const;
+
+const STAFF_PAGES: readonly string[] = ['dashboard', 'compose', 'inbox', 'history', 'moderation', 'tickets', 'logs'];
 
 function Login() {
     return (
@@ -56,7 +59,6 @@ export default function App() {
     const [unread, setUnread] = useState(0);
     const [waitingTickets, setWaitingTickets] = useState(0);
     const parts = useHash();
-    const page = parts[0] ?? 'dashboard';
     const connected = useLiveConnected();
 
     useEffect(() => {
@@ -95,14 +97,18 @@ export default function App() {
     if (me === undefined) return <div className="login"><Spinner /></div>;
     if (me === null) return <Login />;
 
-    const flush = page === 'inbox' || (page === 'tickets' && parts[1] !== 'panels' && parts[1] !== 'settings');
+    const owner = me.access === 'owner';
+    const nav = owner ? NAV : NAV.filter(n => STAFF_PAGES.includes(n[0]));
+    const page = nav.some(n => n[0] === parts[0]) ? parts[0] : 'dashboard';
+    const flush = page === 'inbox' || (page === 'tickets' && !(owner && (parts[1] === 'panels' || parts[1] === 'settings')));
     return (
+        <AccessContext.Provider value={me.access}>
         <ConfirmProvider>
             <div className="app">
                 <aside className="sidebar">
                     <div className="brand"><div className="logo">KB</div><div><b>KB Bot</b><small>Panel de gestión</small></div></div>
                     <nav className="nav">
-                        {NAV.map(([id, label, icon]) => (
+                        {nav.map(([id, label, icon]) => (
                             <a key={id} href={`#/${id}`} className={page === id ? 'active' : ''}>
                                 <Icon name={icon} /> {label}
                                 {id === 'inbox' && unread > 0 && <span className="count">{unread > 99 ? '99+' : unread}</span>}
@@ -133,10 +139,11 @@ export default function App() {
                     {page === 'news' && <News />}
                     {page === 'modules' && <Modules />}
                     {page === 'logs' && <Logs />}
-                    {!NAV.some(n => n[0] === page) && <Dashboard />}
+                    {page === 'access' && <Access />}
                 </main>
             </div>
             <Toasts />
         </ConfirmProvider>
+        </AccessContext.Provider>
     );
 }

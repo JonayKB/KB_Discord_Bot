@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { del, get, post, put, type EmbedData, type FileInfo, type Msg, type Status, type Target, type Template } from '../api';
 import { fmtRelative } from '../format';
+import { useIsOwner } from '../access';
 import { useLive } from '../live';
 import {
     Check, DiscordPreview, EmbedFields, Empty, FileDrop, Icon, Modal, PageHead, TargetPicker, VariableChips,
@@ -13,6 +14,7 @@ const templateFiles = (t: Template): FileInfo[] =>
     t.files.map(f => ({ ...f, isImage: /^image\/(png|jpe?g|gif|webp)$/.test(f.mime) }));
 
 export default function Compose() {
+    const owner = useIsOwner();
     const confirm = useConfirm();
     const [target, setTarget] = useState<Target>({ type: 'user', id: '' });
     const [content, setContent] = useState('');
@@ -168,8 +170,8 @@ export default function Compose() {
                         <DiscordPreview botName={status?.bot?.tag ?? 'Bot'} botAvatar={status?.bot?.avatar} content={content} embed={embedOn ? embed : null} files={up.files} />
                         <div className="row wrap">
                             <button className="btn primary" disabled={sending || up.uploading} onClick={send}><Icon name="send" /> {sending ? 'Enviando…' : 'Enviar ahora'}</button>
-                            <button className="btn" disabled={!hasBody} onClick={() => setSaveOpen(true)}>Guardar como plantilla</button>
-                            {loaded && <button className="btn" disabled={!hasBody} onClick={() => saveTemplate(true)}>Actualizar "{loaded.name}"</button>}
+                            {owner && <button className="btn" disabled={!hasBody} onClick={() => setSaveOpen(true)}>Guardar como plantilla</button>}
+                            {owner && loaded && <button className="btn" disabled={!hasBody} onClick={() => saveTemplate(true)}>Actualizar "{loaded.name}"</button>}
                         </div>
                     </div>
                 </div>
@@ -182,7 +184,7 @@ export default function Compose() {
                                 <div key={t.id} className="card" style={{ padding: 10, background: loaded?.id === t.id ? 'var(--accent-soft)' : 'var(--panel-2)' }}>
                                     <div className="row between"><b className="ellipsis">{t.name}</b><span className="muted small nowrap">{fmtRelative(t.updatedAt)}</span></div>
                                     <div className="muted small ellipsis" style={{ margin: '2px 0 8px' }}>{t.content || t.embed?.title || '(solo adjuntos)'}</div>
-                                    <div className="row"><button className="btn sm" onClick={() => loadTemplate(t)}>Cargar</button><button className="btn sm danger" onClick={() => removeTemplate(t)} aria-label="Eliminar"><Icon name="trash" size={14} /></button></div>
+                                    <div className="row"><button className="btn sm" onClick={() => loadTemplate(t)}>Cargar</button>{owner && <button className="btn sm danger" onClick={() => removeTemplate(t)} aria-label="Eliminar"><Icon name="trash" size={14} /></button>}</div>
                                 </div>
                             ))}
                         </div>

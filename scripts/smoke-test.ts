@@ -5,10 +5,12 @@
  *   npm run smoke
  */
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import { WebSocket } from 'ws';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kbbot-smoke-'));
 fs.mkdirSync(path.join(tmp, 'data'));
@@ -63,6 +65,7 @@ async function main() {
     const { migrateLegacy, migrateReactions, migrateServers } = await import(src('core/migrateLegacy'));
     const { setServices } = await import(src('core/services'));
     const { startLogCapture } = await import(src('core/logs'));
+    const { publish } = await import(src('core/bus'));
     startLogCapture();
 
     // ── Discord simulado ──
@@ -1017,6 +1020,108 @@ async function main() {
     assert.equal(newsFailed.lastError, 'caído');
     assert.equal(newsFailed.feed.messages.length, 3);
     ok('si Discord falla se conserva el último fichero');
+
+    console.log('\nRoles de administrador');
+    const STAFF_ID = '100000000000000001', OTHER_STAFF_ID = '100000000000000002', OUTSIDER_ID = '100000000000000003';
+    mock.addRole('R_STAFF', 'Administradores');
+    mock.addMember(STAFF_ID, 'mod_dc', ['R_STAFF']);
+    mock.addMember(OTHER_STAFF_ID, 'mod2_dc', ['R_STAFF']);
+    mock.addMember(OUTSIDER_ID, 'nadie_dc');
+    mock.addMember('U_TK', 'ticket_dc');
+    const sessionFor = (userId: string, username: string) => {
+        const token = `token-${userId}`;
+        db.prepare('INSERT INTO sessions (id, user_id, username, avatar, expires_at) VALUES (?, ?, ?, NULL, ?)')
+            .run(crypto.createHash('sha256').update(token).digest('hex'), userId, username, Date.now() + 3600_000);
+        return { cookie: `kb_session=${token}` };
+    };
+    const asStaff = sessionFor(STAFF_ID, 'Mod');
+    const asOutsider = sessionFor(OUTSIDER_ID, 'Nadie');
+
+    assert.equal((await call('GET', '/api/me', undefined, asStaff)).status, 401);
+    ok('sin configurar el rol no se entra al panel');
+
+    assert.equal((await call('PUT', '/api/access', { roleIds: ['G1'] })).status, 400, '@everyone no se puede elegir');
+    assert.equal((await call('PUT', '/api/access', { roleIds: ['NO_EXISTE'] })).status, 400);
+    assert.deepEqual((await call('PUT', '/api/access', { roleIds: ['R_STAFF'] })).json.roleIds, ['R_STAFF']);
+    assert.equal((await call('GET', '/api/me')).json.access, 'owner');
+    assert.equal((await call('GET', '/api/me', undefined, asStaff)).json.access, 'staff');
+    assert.equal((await call('GET', '/api/me', undefined, asOutsider)).status, 401);
+    ok('el propietario elige el rol y solo quien lo tiene entra, con acceso limitado');
+
+    for (const url of ['/api/status', '/api/logs', '/api/modules', '/api/guild/members', '/api/guild/roles', '/api/guild/channels', '/api/messages/history',
+        '/api/messages/templates', '/api/inbox/conversations', '/api/inbox/settings', '/api/moderation/cases', '/api/moderation/bans', '/api/moderation/config', '/api/tickets']) {
+        assert.equal((await call('GET', url, undefined, asStaff)).status, 200, url);
+    }
+    ok('puede ver resumen, mensajes, bandeja, historial, moderación, tickets y registros');
+
+    const forbidden: Array<[string, string]> = [
+        ['GET', '/api/access'], ['PUT', '/api/access'],
+        ['GET', '/api/scheduler/jobs'], ['GET', '/api/confirmations'], ['GET', '/api/servers'], ['GET', '/api/reactions'],
+        ['GET', '/api/welcome'], ['GET', '/api/news'], ['POST', '/api/modules/inbox/enabled'],
+        ['PUT', '/api/inbox/settings'], ['DELETE', '/api/messages/history/1'], ['POST', '/api/messages/templates'], ['DELETE', '/api/messages/templates/1'],
+        ['PUT', '/api/moderation/config'], ['DELETE', '/api/moderation/cases/1'],
+        ['GET', '/api/tickets/config'], ['PUT', '/api/tickets/config'], ['GET', '/api/tickets/panels'], ['DELETE', '/api/tickets/1'],
+        ['POST', '/api/MODULES/inbox/enabled'], ['GET', '/api/tickets/panels/'],
+    ];
+    for (const [method, url] of forbidden) {
+        assert.equal((await call(method, url, method === 'GET' || method === 'DELETE' ? undefined : {}, asStaff)).status, 403, `${method} ${url}`);
+    }
+    ok('todo lo demás responde 403: configuración, módulos, plantillas y borrar registros');
+
+    const staffDm = await call('POST', '/api/messages/send', { target: { type: 'user', id: 'U1' }, payload: { content: 'hola de mod' } }, asStaff);
+    assert.equal(staffDm.status, 200, JSON.stringify(staffDm.json));
+    assert.deepEqual([staffDm.json.sentById, staffDm.json.sentByName], [STAFF_ID, 'Mod']);
+    const staffReply = await call('POST', '/api/inbox/conversations/U1/reply', { content: 'te respondo' }, asStaff);
+    assert.equal(staffReply.json.sentByName, 'Mod');
+    const history = (await call('GET', '/api/messages/history?q=Mod&limit=10', undefined, asStaff)).json;
+    assert.ok(history.some((m: any) => m.id === staffDm.json.id) && history.some((m: any) => m.id === staffReply.json.id));
+    const ownerDm = (await call('POST', '/api/messages/send', { target: { type: 'channel', id: 'C1' }, payload: { content: 'del dueño' } })).json;
+    assert.equal(ownerDm.sentByName, 'Desarrollo');
+    ok('el historial guarda quién envió cada mensaje y bandeja, y se puede buscar por autor');
+
+    const sendBefore = sent.length;
+    assert.equal((await call('POST', '/api/moderation/actions', { action: 'warn', userId: OTHER_STAFF_ID, reason: 'x' }, asStaff)).status, 403);
+    assert.equal(sent.length, sendBefore, 'no se avisa por MD de una sanción rechazada');
+    const warned = await call('POST', '/api/moderation/actions', { action: 'warn', userId: OUTSIDER_ID, reason: 'aviso' }, asStaff);
+    assert.equal(warned.status, 201, JSON.stringify(warned.json));
+    assert.equal(warned.json.moderatorName, 'Mod');
+    ok('sanciona con su nombre, pero no a quien tiene acceso al panel');
+
+    interact(`tk:open:${tSup.id}`, 'U_TK');
+    await sleep(80);
+    const staffTicket = (await call('GET', '/api/tickets?status=open&q=ticket_dc', undefined, asStaff)).json.tickets[0];
+    assert.equal(staffTicket.claimedById, null);
+    assert.equal((await call('POST', `/api/tickets/${staffTicket.id}/reply`, { content: 'te ayudo' }, asStaff)).status, 201);
+    let claimed = (await call('GET', `/api/tickets/${staffTicket.id}`, undefined, asStaff)).json;
+    assert.deepEqual([claimed.ticket.claimedById, claimed.ticket.claimedByName], [STAFF_ID, 'Mod']);
+    assert.ok(claimed.messages.some((m: any) => m.kind === 'system' && /Mod atiende/.test(m.content)));
+    const asOther = sessionFor(OTHER_STAFF_ID, 'Mod2');
+    await call('POST', `/api/tickets/${staffTicket.id}/reply`, { content: 'yo también' }, asOther);
+    claimed = (await call('GET', `/api/tickets/${staffTicket.id}`, undefined, asOther)).json;
+    assert.equal(claimed.ticket.claimedById, STAFF_ID, 'no se quita el ticket a quien ya lo atiende');
+    assert.equal((await call('POST', `/api/tickets/${staffTicket.id}/close`, { reason: 'hecho' }, asStaff)).status, 200);
+
+    interact(`tk:open:${tSup.id}`, 'U_TK');
+    await sleep(80);
+    const ownerTicket = (await call('GET', '/api/tickets?status=open&q=ticket_dc')).json.tickets[0];
+    await call('POST', `/api/tickets/${ownerTicket.id}/reply`, { content: 'soy el dueño' });
+    assert.equal((await call('GET', `/api/tickets/${ownerTicket.id}`)).json.ticket.claimedById, null);
+    ok('responder a un ticket libre lo marca como atendido por el administrador, sin quitárselo a nadie');
+
+    const staffSocket = new WebSocket(`ws://127.0.0.1:${PORT}/ws`, { headers: asStaff });
+    const received: string[] = [];
+    staffSocket.on('message', d => received.push(JSON.parse(String(d)).type));
+    await new Promise((resolve, reject) => { staffSocket.once('open', resolve); staffSocket.once('error', reject); });
+    publish('servers:status', {});
+    publish('tickets:changed', {});
+    await sleep(50);
+    assert.ok(received.includes('tickets:changed') && !received.includes('servers:status'));
+    staffSocket.close();
+    ok('en directo solo recibe los eventos de sus secciones');
+
+    members.get(STAFF_ID).roles.cache.delete('R_STAFF');
+    assert.equal((await call('GET', '/api/status', undefined, asStaff)).status, 401);
+    ok('al quitarle el rol pierde el acceso sin esperar a que caduque la sesión');
 
     console.log(`\n✅ ${passed} comprobaciones superadas`);
     cdn.close();
