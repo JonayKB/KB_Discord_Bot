@@ -1,4 +1,4 @@
-import { EmbedBuilder, escapeMarkdown } from 'discord.js';
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, StringSelectMenuBuilder, escapeMarkdown } from 'discord.js';
 
 /**
  * Estadísticas que envía el mod kb_discord_auth y cómo se muestran.
@@ -69,7 +69,7 @@ export function rankLine(pos: number, row: RankRow, key: StatKey, inGuild: (id: 
 }
 
 /** Une líneas sin pasarse del límite de un campo (1024). */
-function fit(lines: string[], limit = 1024): string {
+function fit(lines: string[], limit: number): string {
     let out = '';
     for (const l of lines) {
         if (out.length + l.length + 1 > limit) break;
@@ -79,43 +79,77 @@ function fit(lines: string[], limit = 1024): string {
 }
 
 export interface RenderInput {
+    leaderboardId: number;
     title: string;
+    /** Categorías y periodos que se pueden elegir (configuración del ranking). */
     stats: StatKey[];
     periods: Period[];
     top: number;
-    /** Filas por estadística y periodo, ya filtradas y ordenadas. */
-    rows: (key: StatKey, period: Period) => RankRow[];
+    /** Vista que se muestra. */
+    stat: StatKey;
+    period: Period;
+    /** Filas de esa vista, ya filtradas y ordenadas. */
+    rows: RankRow[];
     inGuild: (id: string) => boolean;
     updatedAt: number;
     stale: boolean;
+    /** En la vista privada: quién la ve, para mostrar su posición. */
+    viewerId?: string;
 }
 
-const embedSize = (e: EmbedBuilder) => {
-    const d = e.data;
-    return (d.title?.length ?? 0) + (d.description?.length ?? 0) + (d.footer?.text.length ?? 0)
-        + (d.fields ?? []).reduce((n, f) => n + f.name.length + f.value.length, 0);
+/** custom_id de los controles: "mclb:<id>:s:<periodo>" (menú) y "mclb:<id>:p:<estadística>:<periodo>" (botones). */
+export const LEADERBOARD_PREFIX = 'mclb:';
+
+export function parseLeaderboardControl(customId: string, values: readonly string[] = []): { id: number; stat: StatKey; period: Period } | null {
+    const [prefix, rawId, kind, a, b] = customId.split(':');
+    if (`${prefix}:` !== LEADERBOARD_PREFIX) return null;
+    const id = Number(rawId);
+    const stat = (kind === 's' ? values[0] : a) as StatKey;
+    const period = (kind === 's' ? a : b) as Period;
+    if (!Number.isSafeInteger(id) || !STAT_KEYS.includes(stat) || !PERIODS.includes(period)) return null;
+    return { id, stat, period };
+}
+
+export type RankingMessage = {
+    content: string;
+    embeds: EmbedBuilder[];
+    components: Array<ActionRowBuilder<StringSelectMenuBuilder> | ActionRowBuilder<ButtonBuilder>>;
 };
 
-/** Mensaje del ranking: cabecera en el contenido y un embed por estadística (≤ 6000 caracteres en total). */
-export function renderRanking(input: RenderInput): { content: string; embeds: EmbedBuilder[] } {
-    const content = [
-        `## ${input.title}`.slice(0, 300),
-        `-# Actualizado <t:${Math.floor(input.updatedAt / 1000)}:R>${input.stale ? ' · ⚠ sin datos recientes del servidor' : ''}`,
-    ].join('\n');
-
-    const build = (top: number) => input.stats.map(key => {
-        const info = STAT_INFO[key];
-        const embed = new EmbedBuilder().setColor(0xf1c40f).setTitle(`${info.emoji} ${info.label}`);
-        const lists = input.periods.map(p => fit(input.rows(key, p).slice(0, top).map((r, i) => rankLine(i + 1, r, key, input.inGuild))));
-        if (input.periods.length === 1) embed.setDescription(lists[0]);
-        else embed.addFields(input.periods.map((p, i) => ({ name: PERIOD_LABEL[p], value: lists[i], inline: true })));
-        return embed;
-    });
-
-    // Discord admite 6000 caracteres entre todos los embeds: si no cabe, se recorta el top.
-    for (let top = input.top; top > 1; top--) {
-        const embeds = build(top);
-        if (embeds.reduce((n, e) => n + embedSize(e), 0) <= 5800) return { content, embeds };
+/** Un solo embed con la vista elegida, un menú para la categoría y botones para el periodo. */
+export function renderRanking(input: RenderInput): RankingMessage {
+    const info = STAT_INFO[input.stat];
+    const lines = input.rows.slice(0, input.top).map((r, i) => rankLine(i + 1, r, input.stat, input.inGuild));
+    const parts = [`### ${info.emoji} ${info.label} · ${PERIOD_LABEL[input.period]}`, fit(lines, 3600)];
+    if (input.viewerId) {
+        const mine = input.rows.findIndex(r => r.discordId === input.viewerId);
+        parts.push(mine >= 0
+            ? `Tu posición: **#${mine + 1}** de ${input.rows.length} · ${fmtStat(input.stat, input.rows[mine].value)}`
+            : '*No apareces en esta categoría.*');
     }
-    return { content, embeds: build(1) };
+    parts.push(`-# Actualizado <t:${Math.floor(input.updatedAt / 1000)}:R>${input.stale ? ' · ⚠ sin datos recientes del servidor' : ''}`);
+
+    const embed = new EmbedBuilder()
+        .setColor(0xf1c40f)
+        .setTitle(input.title.slice(0, 256))
+        .setDescription(parts.join('\n\n'));
+
+    const components: RankingMessage['components'] = [];
+    if (input.stats.length > 1) {
+        components.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+            new StringSelectMenuBuilder()
+                .setCustomId(`${LEADERBOARD_PREFIX}${input.leaderboardId}:s:${input.period}`)
+                .setPlaceholder('Elige una categoría')
+                .addOptions(input.stats.map(k => ({ label: STAT_INFO[k].label, value: k, emoji: STAT_INFO[k].emoji, default: k === input.stat }))),
+        ));
+    }
+    if (input.periods.length > 1) {
+        components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(input.periods.map(p =>
+            new ButtonBuilder()
+                .setCustomId(`${LEADERBOARD_PREFIX}${input.leaderboardId}:p:${input.stat}:${p}`)
+                .setLabel(PERIOD_LABEL[p])
+                .setStyle(p === input.period ? ButtonStyle.Primary : ButtonStyle.Secondary),
+        )));
+    }
+    return { content: '', embeds: [embed], components };
 }
