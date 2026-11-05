@@ -627,11 +627,23 @@ async function main() {
         const { default: rankingCmd } = await import(src('commands/stats/ranking'));
         let replied: any = null;
         await rankingCmd.execute({
-            options: { getString: (n: string) => (n === 'estadistica' ? 'playTimeSeconds' : 'total'), getInteger: () => null },
+            options: { getString: () => null, getInteger: () => null },
             client, user: { id: 'U1' }, reply: async (o: any) => { replied = o; },
         } as any);
+        assert.equal(replied.flags, MessageFlags.Ephemeral);
+        assert.equal(replied.embeds[0].data.title, '🏆 KB Survival');
+        assert.match(replied.embeds[0].data.description, /^### ⏱️ Tiempo jugado · Total/, 'sin opciones: tiempo jugado y total');
         assert.match(replied.embeds[0].data.description, /Tu posición: \*\*#2\*\* de 3 · 16m/);
-        ok('/ranking: top y posición de quien lo ejecuta');
+        const cmdSelect = replied.components[0].toJSON().components[0];
+        assert.equal(cmdSelect.custom_id, `mcrk:${mcId}:s:total`);
+        assert.equal(cmdSelect.options.length, 5, 'todas las categorías');
+        const cmdWeekly = replied.components[1].toJSON().components[1].custom_id;
+        const fromCmd = await useControl(cmdWeekly, 'U1', { ephemeral: true });
+        assert.match(fromCmd.update.embeds[0].data.description, /^### ⏱️ Tiempo jugado · Esta semana/, 'los botones de /ranking actualizan la respuesta');
+        const fromCmdSelect = await useControl(`mcrk:${mcId}:s:weekly`, 'U1', { values: ['deaths'], ephemeral: true });
+        assert.match(fromCmdSelect.update.embeds[0].data.description, /^### 💀 Más muertes · Esta semana/);
+        assert.match((await useControl('mcrk:99999:p:deaths:total', 'U1', { ephemeral: true })).reply.content, /ya no existe/);
+        ok('/ranking: vista privada con menú, botones y posición de quien lo ejecuta');
 
         // Rate limit, regenerar y borrar
         const old = KEY;

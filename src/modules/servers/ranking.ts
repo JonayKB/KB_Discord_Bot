@@ -79,7 +79,8 @@ function fit(lines: string[], limit: number): string {
 }
 
 export interface RenderInput {
-    leaderboardId: number;
+    /** Prefijo del custom_id de los controles (ver controlPrefix). */
+    controls: string;
     title: string;
     /** Categorías y periodos que se pueden elegir (configuración del ranking). */
     stats: StatKey[];
@@ -97,17 +98,21 @@ export interface RenderInput {
     viewerId?: string;
 }
 
-/** custom_id de los controles: "mclb:<id>:s:<periodo>" (menú) y "mclb:<id>:p:<estadística>:<periodo>" (botones). */
-export const LEADERBOARD_PREFIX = 'mclb:';
+/**
+ * custom_id de los controles: "<origen>:<id>:s:<periodo>" (menú) y "<origen>:<id>:p:<estadística>:<periodo>" (botones).
+ * Origen "mclb": un ranking publicado en un canal (id del ranking). "mcrk": el comando /ranking (id del servidor).
+ */
+export type ControlSource = 'mclb' | 'mcrk';
+export const controlPrefix = (source: ControlSource, id: number) => `${source}:${id}`;
 
-export function parseLeaderboardControl(customId: string, values: readonly string[] = []): { id: number; stat: StatKey; period: Period } | null {
-    const [prefix, rawId, kind, a, b] = customId.split(':');
-    if (`${prefix}:` !== LEADERBOARD_PREFIX) return null;
+export function parseControl(customId: string, values: readonly string[] = []): { source: ControlSource; id: number; stat: StatKey; period: Period } | null {
+    const [source, rawId, kind, a, b] = customId.split(':');
+    if (source !== 'mclb' && source !== 'mcrk') return null;
     const id = Number(rawId);
     const stat = (kind === 's' ? values[0] : a) as StatKey;
     const period = (kind === 's' ? a : b) as Period;
     if (!Number.isSafeInteger(id) || !STAT_KEYS.includes(stat) || !PERIODS.includes(period)) return null;
-    return { id, stat, period };
+    return { source, id, stat, period };
 }
 
 export type RankingMessage = {
@@ -138,7 +143,7 @@ export function renderRanking(input: RenderInput): RankingMessage {
     if (input.stats.length > 1) {
         components.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
             new StringSelectMenuBuilder()
-                .setCustomId(`${LEADERBOARD_PREFIX}${input.leaderboardId}:s:${input.period}`)
+                .setCustomId(`${input.controls}:s:${input.period}`)
                 .setPlaceholder('Elige una categoría')
                 .addOptions(input.stats.map(k => ({ label: STAT_INFO[k].label, value: k, emoji: STAT_INFO[k].emoji, default: k === input.stat }))),
         ));
@@ -146,7 +151,7 @@ export function renderRanking(input: RenderInput): RankingMessage {
     if (input.periods.length > 1) {
         components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(input.periods.map(p =>
             new ButtonBuilder()
-                .setCustomId(`${LEADERBOARD_PREFIX}${input.leaderboardId}:p:${input.stat}:${p}`)
+                .setCustomId(`${input.controls}:p:${input.stat}:${p}`)
                 .setLabel(PERIOD_LABEL[p])
                 .setStyle(p === input.period ? ButtonStyle.Primary : ButtonStyle.Secondary),
         )));
