@@ -247,12 +247,21 @@ export function startWebServer({ client, db, manager }: WebDeps): http.Server {
     });
 
     // ── Servidor HTTP + WebSocket en tiempo real ──
-    const server = http.createServer(app);
+    // Solo los WebSocket del panel pasan al evento 'upgrade'. El resto (p. ej. "Upgrade: h2c", que manda el HttpClient
+    // de Java del mod de Minecraft con http://) se atiende como una petición normal; si no, acababa en un 401 vacío.
+    const isWebSocket = (req: http.IncomingMessage) => (req.headers.upgrade ?? '').toLowerCase() === 'websocket';
+    const server = http.createServer({ shouldUpgradeCallback: isWebSocket } as http.ServerOptions, app);
     const wss = new WebSocketServer({ noServer: true });
 
     const sockets = new WeakMap<WebSocket, { userId: string; access: PanelAccess }>();
 
     server.on('upgrade', async (req, socket, head) => {
+        if (!isWebSocket(req)) {
+            // Versiones de Node sin shouldUpgradeCallback: al menos queda claro en el log qué ha pasado.
+            logger.warn(`Petición rechazada a ${req.url}: pide "Upgrade: ${req.headers.upgrade}" y solo se admite WebSocket (actualiza Node o usa HTTP/1.1 en el cliente)`);
+            socket.end('HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{"error":"Upgrade no soportado: usa HTTP/1.1"}');
+            return;
+        }
         const url = new URL(req.url ?? '/', 'http://localhost');
         const origin = req.headers.origin;
         const sameOrigin = !origin || (() => { try { return new URL(origin).host === req.headers.host; } catch { return false; } })();

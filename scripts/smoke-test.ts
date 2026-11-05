@@ -446,6 +446,22 @@ async function main() {
         const noSession = await fetch(base + STATS_URL, { method: 'POST', headers: { cookie } });
         assert.equal(noSession.status, 401, 'la sesión del panel no sirve: solo la API key');
         const gen = (await call('POST', `/api/servers/${mcId}/stats/key`)).json;
+        // El HttpClient de Java (el mod) pide "Upgrade: h2c" con http://: debe llegar a la ruta, no al manejador de WebSocket.
+        const net = await import('node:net');
+        const h2c = await new Promise<string>((resolve, reject) => {
+            const body = JSON.stringify(bodyOf([pl(UUID_C, 'Tester', 1, {})]));
+            const sock = net.connect(PORT, '127.0.0.1', () => sock.write(
+                `POST ${STATS_URL} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: Upgrade, HTTP2-Settings\r\nUpgrade: h2c\r\nHTTP2-Settings: AAEAAEAAAAIAAAABAAMAAABkAAQBAAAAAAUAAEAA\r\n` +
+                `Authorization: Bearer ${gen.key}\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`));
+            let data = '';
+            sock.on('data', d => { data += d; if (data.includes('}')) { sock.destroy(); resolve(data); } });
+            sock.on('error', reject);
+            setTimeout(() => { sock.destroy(); resolve(data); }, 2000);
+        });
+        assert.match(h2c, /^HTTP\/1\.1 200/, 'una petición con "Upgrade: h2c" se atiende con normalidad');
+        assert.match(h2c, /"accepted":1/);
+        db.prepare('DELETE FROM mc_stats_players').run();
+        db.prepare('DELETE FROM mc_stats_weekly_base').run();
         assert.match(gen.key, /^kbs_/);
         assert.equal(gen.endpoint, `${base}${STATS_URL}`);
         const dbKey = db.prepare('SELECT key_hash FROM mc_stats_keys WHERE server_id = ?').get(mcId) as any;
