@@ -7,6 +7,31 @@ import { parsePayload, type McStatsService } from './stats';
 
 const logger = new Logger('McStatsIngest');
 
+/**
+ * La key sin revelarla: principio, final y longitud, para compararla con la del mod.
+ * Avisa de lo que suele romperse al copiarla (comillas, prefijo, longitud).
+ */
+export function describeKey(key: string): string {
+    const shown = key.length <= 12 ? '*'.repeat(key.length) : `${key.slice(0, 8)}…${key.slice(-4)}`;
+    const notes = [`${key.length} caracteres`];
+    if (/["']/.test(key)) notes.push('tiene comillas');
+    if (!key.startsWith('kbs_')) notes.push('no empieza por kbs_');
+    else if (key.length !== 47) notes.push('deberían ser 47');
+    return `${shown} (${notes.join(', ')})`;
+}
+
+/** Un aviso por motivo y origen cada 10 min, para no llenar el log con los reintentos del mod. */
+const lastWarned = new Map<string, number>();
+function warnAuth(req: Request, reason: string): void {
+    const from = `${req.ip ?? '?'} · ${req.get('user-agent') ?? '?'}`;
+    const id = `${from}|${reason}`;
+    const now = Date.now();
+    if (now - (lastWarned.get(id) ?? 0) < 10 * 60_000) return;
+    for (const [k, t] of lastWarned) if (now - t >= 10 * 60_000) lastWarned.delete(k);
+    lastWarned.set(id, now);
+    logger.warn(`🔑 Estadísticas rechazadas (${from}): ${reason}`);
+}
+
 /** Peticiones por minuto y key. */
 const RATE_LIMIT = 30;
 
@@ -22,12 +47,26 @@ export function createStatsIngestRouter(db: DB, getService: () => McStatsService
         const service = getService();
         if (!service) throw new HttpError(503, 'El módulo "Servidores de juego" está desactivado');
 
-        const m = /^Bearer\s+(\S+)$/i.exec(req.get('authorization') ?? '');
-        const serverId = m ? service.serverForKey(m[1]) : null;
-        if (!serverId) throw new HttpError(401, 'API key no válida');
+        const header = req.get('authorization');
+        const m = /^Bearer\s+(\S+)$/i.exec(header ?? '');
+        if (!m) {
+            const reason = header ? 'la cabecera Authorization no tiene el formato "Bearer <key>"' : 'falta la cabecera Authorization';
+            warnAuth(req, reason);
+            throw new HttpError(401, `API key no válida: ${reason}`);
+        }
+        const serverId = service.serverForKey(m[1]);
+        if (!serverId) {
+            const reason = `ningún servidor tiene la key ${describeKey(m[1])}; ¿se regeneró o es de otro panel?`;
+            warnAuth(req, reason);
+            throw new HttpError(401, `API key no válida: ${reason}`);
+        }
 
-        const server = db.prepare('SELECT type FROM game_servers WHERE id = ?').get(serverId) as { type: string } | undefined;
-        if (!server || server.type !== 'minecraft') throw new HttpError(403, 'La key no corresponde a un servidor de Minecraft');
+        const server = db.prepare('SELECT name, type FROM game_servers WHERE id = ?').get(serverId) as { name: string; type: string } | undefined;
+        if (!server || server.type !== 'minecraft') {
+            const reason = `la key es del servidor #${serverId}${server ? ` ("${server.name}", ${server.type})` : ''}, que no es de Minecraft`;
+            warnAuth(req, reason);
+            throw new HttpError(403, `API key no válida: ${reason}`);
+        }
 
         const now = Date.now();
         const id = crypto.createHash('sha256').update(m![1]).digest('hex');

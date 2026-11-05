@@ -437,8 +437,12 @@ async function main() {
             ({ uuid, name, discordId, online: true, takenAt, stats, extraField: 'se ignora' });
         const bodyOf = (players: unknown[], version = 1) => ({ version, server: { id: '46bf8427d5aadb8d5fd070fa87e1792b', name: 'KB Survival' }, sentAt: Date.now(), players });
 
-        assert.equal((await push(null, bodyOf([pl(UUID_A, 'Steve', 1, {})]))).status, 401);
-        assert.equal((await push('kbs_nope', bodyOf([pl(UUID_A, 'Steve', 1, {})]))).status, 401);
+        const noKey = await push(null, bodyOf([pl(UUID_A, 'Steve', 1, {})]));
+        assert.equal(noKey.status, 401);
+        assert.match(noKey.json.error, /falta la cabecera Authorization/);
+        const wrongKey = await push('kbs_nope', bodyOf([pl(UUID_A, 'Steve', 1, {})]));
+        assert.equal(wrongKey.status, 401);
+        assert.match(wrongKey.json.error, /ningún servidor tiene la key \*{8} \(8 caracteres, deberían ser 47\)/, 'dice por qué, sin repetir una key corta');
         const noSession = await fetch(base + STATS_URL, { method: 'POST', headers: { cookie } });
         assert.equal(noSession.status, 401, 'la sesión del panel no sirve: solo la API key');
         const gen = (await call('POST', `/api/servers/${mcId}/stats/key`)).json;
