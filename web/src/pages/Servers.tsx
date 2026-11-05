@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import { del, get, post, put, type GameServer, type ModuleInfo, type ServerHistory, type ServerKind, type ServerStatus } from '../api';
+import { del, get, post, put, type Channel, type GameServer, type ModuleInfo, type ServerHistory, type ServerKind, type ServerStatus } from '../api';
 import { TimeChart, UptimeStrip, fmtTipTime } from '../charts';
 import ServerRcon from './ServerRcon';
+import ServerRanking from './ServerRanking';
 import { fmtDateTime, fmtRelative } from '../format';
 import { useLive } from '../live';
 import { Check, ChannelSelect, Empty, Icon, Modal, PageHead, Spinner, Switch, errMsg, toast, useConfirm, useGuildData } from '../ui';
@@ -95,7 +96,7 @@ export default function Servers() {
             ) : (
                 <div className="stack">
                     {servers.map(s => (
-                        <ServerCard key={s.id} server={s} busy={checking.has(s.id)} running={running} channelName={channelName(s.channelId)}
+                        <ServerCard key={s.id} server={s} busy={checking.has(s.id)} running={running} channelName={channelName(s.channelId)} channels={guild.channels}
                             onCheck={() => check(s)} onEdit={() => setEditing(s)} onDelete={() => remove(s)} onToggle={v => toggle(s, v)}
                             onMessage={() => setMsgFor(s)} onUnlink={() => unlink(s)} />
                     ))}
@@ -110,13 +111,14 @@ export default function Servers() {
 
 // ───────────────────────────── Tarjeta de un servidor ─────────────────────────────
 
-function ServerCard({ server: s, busy, running, channelName, onCheck, onEdit, onDelete, onToggle, onMessage, onUnlink }: {
-    server: GameServer; busy: boolean; running: boolean; channelName?: string;
+function ServerCard({ server: s, busy, running, channelName, channels, onCheck, onEdit, onDelete, onToggle, onMessage, onUnlink }: {
+    server: GameServer; busy: boolean; running: boolean; channelName?: string; channels: Channel[];
     onCheck: () => void; onEdit: () => void; onDelete: () => void; onToggle: (v: boolean) => void; onMessage: () => void; onUnlink: () => void;
 }) {
     const st = s.status;
     const [showStats, setShowStats] = useState(false);
     const [showRcon, setShowRcon] = useState(false);
+    const [showRanking, setShowRanking] = useState(false);
     const state = !s.enabled ? 'paused' : !st ? 'unknown' : st.online ? 'online' : 'offline';
     const fill = st && st.maxPlayers > 0 ? Math.min(st.playersOnline / st.maxPlayers, 1) : 0;
 
@@ -133,6 +135,7 @@ function ServerCard({ server: s, busy, running, channelName, onCheck, onEdit, on
                     <label className="row small muted">Activo <Switch checked={s.enabled} disabled={!running} onChange={onToggle} label="Consultar este servidor" /></label>
                     <button className="btn sm" disabled={!running || !s.enabled || busy} onClick={onCheck}><Icon name="refresh" size={14} /> {busy ? 'Consultando…' : 'Comprobar'}</button>
                     <button className={`btn sm ${showStats ? 'primary' : ''}`} onClick={() => setShowStats(v => !v)} aria-expanded={showStats}><Icon name="chart" size={14} /> Estadísticas</button>
+                    {s.type === 'minecraft' && <button className={`btn sm ${showRanking ? 'primary' : ''}`} onClick={() => setShowRanking(v => !v)} aria-expanded={showRanking}><Icon name="list" size={14} /> Ranking</button>}
                     {s.type === 'minecraft' && <button className={`btn sm ${showRcon ? 'primary' : ''}`} onClick={() => setShowRcon(v => !v)} aria-expanded={showRcon}><Icon name="terminal" size={14} /> RCON</button>}
                     <button className="btn sm" disabled={!running} onClick={onEdit}><Icon name="edit" size={14} /> Editar</button>
                     <button className="btn sm danger" disabled={!running} onClick={onDelete} aria-label="Eliminar servidor"><Icon name="trash" size={14} /></button>
@@ -206,6 +209,7 @@ function ServerCard({ server: s, busy, running, channelName, onCheck, onEdit, on
             )}
 
             {showStats && <><div className="sep" /><ServerStats server={s} /></>}
+            {showRanking && s.type === 'minecraft' && <><div className="sep" /><ServerRanking server={s} running={running} channels={channels} /></>}
             {showRcon && s.type === 'minecraft' && <><div className="sep" /><ServerRcon server={s} running={running} /></>}
 
             <div className="sep" />

@@ -53,7 +53,9 @@ async function main() {
     const { createConfirmationsModule } = await import(src('modules/confirmations'));
     const { SchedulerService } = await import(src('modules/scheduler/service'));
     const { createSchedulerModule } = await import(src('modules/scheduler'));
-    const { ServersService, WhitelistService, createServersModule } = await import(src('modules/servers'));
+    const { McStatsService, ServersService, WhitelistService, createServersModule } = await import(src('modules/servers'));
+    const { weekStartOf } = await import(src('modules/servers/stats'));
+    const { fmtDistance, fmtPlayTime, thousands } = await import(src('modules/servers/ranking'));
     const { ReactionRolesService, createReactionsModule } = await import(src('modules/reactions'));
     const { WelcomeService, createWelcomeModule } = await import(src('modules/welcome'));
     const { ModerationService, createModerationModule } = await import(src('modules/moderation'));
@@ -95,16 +97,17 @@ async function main() {
     const scheduler = new SchedulerService(db, messages, confirmations);
     const gameServers = new ServersService(client, db, confirmations);
     const whitelist = new WhitelistService(client, db, gameServers, confirmations);
+    const mcStats = new McStatsService(client, db);
     const reactions = new ReactionRolesService(client, db);
     const welcome = new WelcomeService(client, db, messages);
     const moderation = new ModerationService(client, db, messages);
     const tickets = new TicketsService(client, db, messages);
-    setServices({ messages, confirmations, servers: gameServers, reactions });
+    setServices({ messages, confirmations, servers: gameServers, mcStats, reactions });
     manager.register(createMessagesModule(messages, db));
     manager.register(createInboxModule(inbox, messages, db));
     manager.register(createSchedulerModule(scheduler));
     manager.register(createConfirmationsModule(confirmations));
-    manager.register(createServersModule(gameServers, whitelist));
+    manager.register(createServersModule(gameServers, whitelist, mcStats));
     manager.register(createReactionsModule(reactions));
     manager.register(createWelcomeModule(welcome));
     manager.register(createModerationModule(moderation));
@@ -418,6 +421,170 @@ async function main() {
     assert.equal((await call('POST', `/api/servers/${down.json.id}/message/unlink`)).json.messageId, null);
     assert.equal((await call('DELETE', `/api/servers/${down.json.id}`)).status, 200);
     ok('frecuencia, publicar / soltar mensaje de estado y eliminar');
+
+    {
+        console.log('\nEstadísticas del mod y rankings');
+        const STATS_URL = '/api/integrations/minecraft/stats';
+        const push = (key: string | null, body: unknown, raw?: string) => fetch(base + STATS_URL, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', 'user-agent': 'kb_discord_auth/test', ...(key ? { authorization: `Bearer ${key}` } : {}) },
+            body: raw ?? JSON.stringify(body),
+        }).then(async r => ({ status: r.status, json: await r.json().catch(() => null) }));
+        const UUID_A = 'f3d28cb0-7225-3cb1-baeb-2dadd2be89ae';
+        const UUID_B = '0a1b2c3d-0000-3000-8000-000000000002';
+        const UUID_C = '0a1b2c3d-0000-3000-8000-000000000003';
+        const pl = (uuid: string, name: string, takenAt: number, stats: Record<string, unknown>, discordId: string | null = null) =>
+            ({ uuid, name, discordId, online: true, takenAt, stats, extraField: 'se ignora' });
+        const bodyOf = (players: unknown[], version = 1) => ({ version, server: { id: '46bf8427d5aadb8d5fd070fa87e1792b', name: 'KB Survival' }, sentAt: Date.now(), players });
+
+        assert.equal((await push(null, bodyOf([pl(UUID_A, 'Steve', 1, {})]))).status, 401);
+        assert.equal((await push('kbs_nope', bodyOf([pl(UUID_A, 'Steve', 1, {})]))).status, 401);
+        const noSession = await fetch(base + STATS_URL, { method: 'POST', headers: { cookie } });
+        assert.equal(noSession.status, 401, 'la sesión del panel no sirve: solo la API key');
+        const gen = (await call('POST', `/api/servers/${mcId}/stats/key`)).json;
+        assert.match(gen.key, /^kbs_/);
+        assert.equal(gen.endpoint, `${base}${STATS_URL}`);
+        const dbKey = db.prepare('SELECT key_hash FROM mc_stats_keys WHERE server_id = ?').get(mcId) as any;
+        assert.equal(dbKey.key_hash, crypto.createHash('sha256').update(gen.key).digest('hex'), 'solo se guarda el SHA-256');
+        assert.equal((await call('GET', `/api/servers/${mcId}/stats`)).json.key.configured, true);
+        ok('API key: sin key o key falsa → 401, se guarda solo su hash');
+
+        const KEY = gen.key;
+        assert.equal((await push(KEY, bodyOf([pl(UUID_A, 'Steve', 1, {})], 2))).status, 400, 'versión desconocida');
+        assert.equal((await push(KEY, bodyOf([]))).status, 400, 'sin jugadores');
+        assert.equal((await push(KEY, null, '{nope')).status, 400, 'JSON roto');
+        const badBatch = await push(KEY, bodyOf([pl(UUID_A, 'Steve', 5, { deaths: 1 }), pl('no-uuid', 'X', 5, {})]));
+        assert.equal(badBatch.status, 400);
+        assert.match(badBatch.json.error, /players\[1\]\.uuid/);
+        assert.equal((await push(KEY, bodyOf([pl(UUID_A, 'Steve', 5, { deaths: -1 })]))).status, 400, 'estadística negativa');
+        assert.equal((await push(KEY, bodyOf([pl(UUID_A, 'NombreDemasiadoLargo', 5, {})]))).status, 400, 'nombre > 16');
+        assert.equal((await call('GET', `/api/servers/${mcId}/stats`)).json.players.length, 0, 'un 400 no guarda nada de la petición');
+        const big = await push(KEY, null, JSON.stringify({ ...bodyOf([pl(UUID_A, 'Steve', 1, {})]), pad: 'x'.repeat(1_100_000) }));
+        assert.equal(big.status, 413);
+        ok('validación: versión, lista vacía, JSON roto, lote con un error, > 1 MB');
+
+        const r1 = await push(KEY, bodyOf([
+            pl(UUID_A, 'Steve', 1000, { playTimeSeconds: 3600, deaths: 2, mobKills: 10, distanceCm: 250_000, advancements: 3, futureStat: 9 }, 'U1'),
+            pl(UUID_B, 'Al_ex*', 1000, { playTimeSeconds: 7200, deaths: 5, mobKills: 3, distanceCm: 50_000 }, '999999999999999999'),
+            pl(UUID_C, 'Tester', 1000, { playTimeSeconds: 60 }),
+        ]));
+        assert.deepEqual(r1, { status: 200, json: { accepted: 3, ignored: 0 } });
+        const r2 = await push(KEY, bodyOf([pl(UUID_A, 'Steve', 1000, { deaths: 99 }), pl(UUID_A, 'Steve', 500, { deaths: 99 })]));
+        assert.deepEqual(r2.json, { accepted: 0, ignored: 2 }, 'mismo takenAt o más viejo → se ignora');
+        // Datos nuevos durante la semana: el semanal es la diferencia con la primera vez que se vio al jugador.
+        await push(KEY, bodyOf([pl(UUID_A, 'Steve', 2000, { playTimeSeconds: 5400, deaths: 3, mobKills: 25 }, 'U1')]));
+        let st = (await call('GET', `/api/servers/${mcId}/stats`)).json;
+        const steve = st.players.find((p: any) => p.uuid === UUID_A);
+        assert.equal(st.displayName, 'KB Survival');
+        assert.deepEqual(steve.total, { playTimeSeconds: 5400, deaths: 3, mobKills: 25, distanceCm: 250_000, advancements: 3 }, 'lo que no llega se conserva; los campos desconocidos se ignoran');
+        assert.deepEqual(steve.weekly, { playTimeSeconds: 1800, deaths: 1, mobKills: 15, distanceCm: 0, advancements: 0 });
+        assert.equal(st.players.find((p: any) => p.uuid === UUID_C).total.deaths, undefined, 'sin dato ≠ 0');
+        ok('totales acumulados, takenAt viejo ignorado, semanal = total − base');
+
+        // Un admin borra world/stats: el total baja → la base pasa a 0 y el semanal es el total nuevo.
+        await push(KEY, bodyOf([pl(UUID_A, 'Steve', 3000, { playTimeSeconds: 600, deaths: 3, mobKills: 25 }, 'U1')]));
+        st = (await call('GET', `/api/servers/${mcId}/stats`)).json;
+        assert.equal(st.players.find((p: any) => p.uuid === UUID_A).weekly.playTimeSeconds, 600);
+        await push(KEY, bodyOf([pl(UUID_A, 'Steve', 4000, { playTimeSeconds: 900, deaths: 3, mobKills: 25 }, 'U1')]));
+        st = (await call('GET', `/api/servers/${mcId}/stats`)).json;
+        assert.equal(st.players.find((p: any) => p.uuid === UUID_A).weekly.playTimeSeconds, 900);
+        ok('si un total baja (world/stats borrado), el semanal sigue contando desde 0');
+
+        // Cambio de semana: la base es el total del momento.
+        const ws = weekStartOf(Date.now());
+        const nextWeek = ws + 7 * 86_400_000 + 3600_000;
+        assert.equal(weekStartOf(nextWeek), ws + 7 * 86_400_000);
+        assert.equal(new Date(ws).toLocaleString('en-GB', { timeZone: 'Europe/Madrid', weekday: 'short', hour: '2-digit', minute: '2-digit' }), 'Mon 00:00');
+        const wsIso = (y: number, m: number, d: number) => new Date(weekStartOf(Date.UTC(y, m, d, 12))).toISOString();
+        assert.equal(wsIso(2026, 2, 29), '2026-03-22T23:00:00.000Z', 'domingo del cambio a CEST: la semana empezó en CET');
+        assert.equal(wsIso(2026, 2, 31), '2026-03-29T22:00:00.000Z', 'semana siguiente, en CEST');
+        assert.equal(wsIso(2026, 9, 25), '2026-10-18T22:00:00.000Z', 'domingo del cambio a CET: la semana empezó en CEST');
+        assert.equal(wsIso(2026, 9, 26), '2026-10-25T23:00:00.000Z', 'semana siguiente, en CET');
+        mcStats.ensureWeek(nextWeek);
+        const baseNext = db.prepare('SELECT stats FROM mc_stats_weekly_base WHERE server_id = ? AND week_start = ? AND uuid = ?').get(mcId, weekStartOf(nextWeek), UUID_A) as any;
+        assert.equal(JSON.parse(baseNext.stats).playTimeSeconds, 900, 'el lunes se copian los totales como base');
+        mcStats.ingest(mcId, { version: 1, server: { id: 'x', name: 'KB Survival' }, sentAt: nextWeek, players: [{ uuid: UUID_A, name: 'Steve', discordId: 'U1', online: true, takenAt: 5000, stats: { playTimeSeconds: 1000 } }] }, nextWeek);
+        const weekly = mcStats.players(mcId); // players() usa la semana actual: se comprueba la base de la siguiente a mano
+        assert.ok(weekly.length === 3);
+        assert.equal(JSON.parse((db.prepare('SELECT stats FROM mc_stats_weekly_base WHERE server_id = ? AND week_start = ? AND uuid = ?').get(mcId, weekStartOf(nextWeek), UUID_A) as any).stats).playTimeSeconds, 900);
+        db.prepare("DELETE FROM settings WHERE key = 'mcstats.week_start'").run();
+        mcStats.ensureWeek();
+        ok('semana: lunes 00:00 en TIMEZONE (también con cambio de hora) y base al empezar');
+
+        assert.equal(fmtPlayTime(3 * 86400 + 4 * 3600 + 59), '3d 4h');
+        assert.equal(fmtPlayTime(5 * 3600 + 12 * 60), '5h 12m');
+        assert.equal(fmtPlayTime(42 * 60 + 5), '42m');
+        assert.equal(fmtDistance(1_234_567), '12.3 km');
+        assert.equal(fmtDistance(85_099), '850 m');
+        assert.equal(thousands(1234567), '1.234.567');
+        assert.equal(thousands(1234), '1.234');
+        ok('formato: tiempo, distancia y separador de miles');
+
+        // Ranking en Discord
+        assert.equal((await call('POST', `/api/servers/${mcId}/leaderboards`, { channelId: 'C1', top: 30 })).status, 400);
+        assert.equal((await call('POST', `/api/servers/${mcId}/leaderboards`, { channelId: 'C1', stats: ['jumps'] })).status, 400);
+        const lb = (await call('POST', `/api/servers/${mcId}/leaderboards`, { channelId: 'C1', exclude: ['tester'] })).json;
+        assert.deepEqual([lb.top, lb.intervalMin, lb.title, lb.periods.length, lb.stats.length], [10, 15, '🏆 {server}', 2, 5], 'valores por defecto');
+        const sent0 = channelsSent.length;
+        const pub = (await call('POST', `/api/servers/${mcId}/leaderboards/${lb.id}/publish`)).json;
+        assert.equal(pub.lastError, null);
+        assert.ok(pub.messageId);
+        assert.equal(channelsSent.length, sent0 + 1, 'se publica un mensaje');
+        const msg = channelsSent.at(-1);
+        assert.match(msg.content, /^## 🏆 KB Survival\n-# Actualizado <t:\d+:R>$/);
+        assert.deepEqual(msg.allowedMentions, { parse: [] });
+        const play = msg.embeds[0].data;
+        assert.equal(play.title, '⏱️ Tiempo jugado');
+        assert.deepEqual(play.fields.map((f: any) => f.name), ['Total', 'Esta semana']);
+        const totalLines = play.fields[0].value.split('\n');
+        assert.match(totalLines[0], /^🥇 \*\*Al\\_ex\\\*\*\* · 2h 0m$/, 'sin miembro en el Discord: solo el nombre, con Markdown escapado');
+        assert.match(totalLines[1], /^🥈 <@U1> \(Steve\) · 16m$/, 'con miembro: mención y nombre de Minecraft');
+        assert.ok(!play.fields[0].value.includes('Tester'), 'excluidos por nombre');
+        assert.equal(msg.embeds[1].data.title, '💀 Más muertes');
+        assert.match(msg.embeds[3].data.fields[0].value, /2\.5 km/);
+
+        const edits1 = counterEdits.length;
+        await call('PUT', `/api/servers/${mcId}/leaderboards/${lb.id}`, { ...lb, periods: ['weekly'], stats: ['playTimeSeconds'], linkedOnly: true, title: 'Top {server}' });
+        await call('POST', `/api/servers/${mcId}/leaderboards/${lb.id}/publish`);
+        assert.equal(channelsSent.length, sent0 + 1, 'las siguientes veces se edita el mismo mensaje');
+        const edited = counterEdits.slice(edits1).at(-1);
+        assert.match(edited.content, /^## Top KB Survival/);
+        assert.equal(edited.embeds.length, 1);
+        assert.equal(edited.embeds[0].data.description, '🥇 <@U1> (Steve) · 16m', 'solo vinculados y una columna');
+
+        db.prepare('UPDATE mc_leaderboards SET message_id = ? WHERE id = ?').run('9_gone', lb.id);
+        const repost = (await call('POST', `/api/servers/${mcId}/leaderboards/${lb.id}/publish`)).json;
+        assert.equal(channelsSent.length, sent0 + 2, 'si el mensaje ya no existe, se vuelve a publicar');
+        assert.notEqual(repost.messageId, '9_gone');
+        db.prepare('UPDATE game_servers SET mc_last_push_at = ? WHERE id = ?').run(Date.now() - 3600_000, mcId);
+        await call('POST', `/api/servers/${mcId}/leaderboards/${lb.id}/publish`);
+        assert.match(counterEdits.at(-1).content, /⚠ sin datos recientes del servidor/);
+        ok('ranking: publicar, editar, volver a publicar, filtros, menciones y aviso de datos viejos');
+
+        // /ranking
+        const { default: rankingCmd } = await import(src('commands/stats/ranking'));
+        let replied: any = null;
+        await rankingCmd.execute({
+            options: { getString: (n: string) => (n === 'estadistica' ? 'playTimeSeconds' : 'total'), getInteger: () => null },
+            client, user: { id: 'U1' }, reply: async (o: any) => { replied = o; },
+        } as any);
+        assert.match(replied.embeds[0].data.description, /Tu posición: \*\*#2\*\* de 3 · 16m/);
+        ok('/ranking: top y posición de quien lo ejecuta');
+
+        // Rate limit, regenerar y borrar
+        const old = KEY;
+        const regen = (await call('POST', `/api/servers/${mcId}/stats/key`)).json.key;
+        assert.equal((await push(old, bodyOf([pl(UUID_A, 'Steve', 9000, {})]))).status, 401, 'al regenerar, la key anterior deja de valer');
+        let limited = 0;
+        for (let i = 0; i < 31; i++) if ((await push(regen, bodyOf([pl(UUID_A, 'Steve', 10_000 + i, {})]))).status === 429) limited++;
+        assert.equal(limited, 1, 'máx. 30 peticiones por minuto y key');
+        await call('DELETE', `/api/servers/${mcId}/stats/players/${UUID_C}`);
+        assert.equal((await call('GET', `/api/servers/${mcId}/stats`)).json.players.length, 2);
+        await call('DELETE', `/api/servers/${mcId}/stats/key`);
+        assert.equal((await push(regen, bodyOf([pl(UUID_A, 'Steve', 99_999, {})]))).status, 401);
+        await call('DELETE', `/api/servers/${mcId}/leaderboards/${lb.id}`);
+        ok('regenerar / revocar key, límite de peticiones y borrar jugador');
+    }
 
     await call('POST', '/api/modules/servers/enabled', { enabled: false });
     assert.equal((await call('POST', `/api/servers/${mcId}/check`)).status, 409);

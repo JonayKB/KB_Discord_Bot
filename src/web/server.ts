@@ -13,6 +13,9 @@ import { NEWS_DIR, UPLOADS_DIR } from '../core/db';
 import { getFile, isInlineImage, registerFile, safeName, toFileInfo } from '../core/files';
 import { BotError, HttpError, asyncRoute, bool, strArray } from '../core/http';
 import { getLogs } from '../core/logs';
+import { getServices } from '../core/services';
+import { createStatsIngestRouter } from '../modules/servers/ingest';
+import { INGEST_PATH } from '../modules/servers/stats';
 import type { ModuleManager } from '../core/module';
 import { Logger, type LogLevel } from '../utils/Logger';
 import { STAFF_EVENTS, getStaffRoleIds, requireStaffRoute, resolveAccess, setStaffRoleIds, type PanelAccess } from './access';
@@ -54,6 +57,9 @@ export function startWebServer({ client, db, manager }: WebDeps): http.Server {
             res.setHeader('Cache-Control', path.basename(file) === 'latest.json' ? 'no-cache' : 'public, max-age=86400');
         },
     }), (_req, res) => void res.status(404).end());
+
+    // ── Público: estadísticas que envía el mod de Minecraft (autenticado con su API key, sin sesión) ──
+    app.use(INGEST_PATH, createStatsIngestRouter(db, () => (manager.isRunning('servers') ? getServices().mcStats : null)));
 
     // ── API (requiere sesión) ──
     const api = Router();

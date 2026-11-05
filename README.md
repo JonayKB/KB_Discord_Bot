@@ -18,6 +18,7 @@ Bot de Discord de MCKBServers, ahora **modular** y con un **panel web** para ges
 | Solo el estado actual del servidor de juego | **Estadísticas** de cada servidor: gráficas de jugadores, TPS, MSPT, CPU, latencia y disponibilidad (1 h a 30 días) |
 | Whitelist a mano | **RCON** en cada servidor de Minecraft: consola desde el panel y whitelist automática a partir de una campaña de confirmación (un nombre por persona, sin repetidos, comprobado con Mojang, con cola si el servidor está apagado y sin tocar nunca los nombres añadidos a mano) |
 | — | Módulo **Tickets**: panel con botones (un tipo de ticket por botón, con formulario opcional) que crea un canal privado en una categoría con el staff; desde el panel se responden, se atienden, se cierran con o sin motivo y queda el historial con transcripción |
+| — | **Rankings de Minecraft**: el mod `kb_discord_auth` envía las estadísticas de cada jugador (tiempo jugado, muertes, mobs, distancia y logros) y el bot publica y mantiene al día una tabla de clasificación (total y semanal) en los canales que elijas, además del comando `/ranking` |
 | — | Módulo **Noticias**: publica los últimos mensajes de un canal en `/news/latest.json` (público) para el launcher, con imágenes propias y encuestas actualizadas |
 | Todo mezclado | Cada función es un módulo independiente que se activa/desactiva al instante |
 
@@ -143,3 +144,10 @@ npm run smoke        # pruebas automáticas de los flujos principales con Discor
 - Errores no capturados ya no tumban el bot, y hay apagado limpio con `pm2 reload`.
 - **Noticias**: el fichero se regenera desde Discord al escribir, editar o borrar en el canal y cada 5 minutos (recuento de encuestas). `/news/*` es público y sin sesión; con nginx basta el proxy general al bot. Es legible por cualquiera: elige un canal sin contenido privado.
 - Las imágenes recibidas se descargan a `data/uploads/` (los enlaces del CDN de Discord caducan).
+- **Rankings de Minecraft** (botón **Ranking** de cada servidor de Minecraft en **Servidores**):
+  1. Pulsa **Generar key**: se muestra una sola vez junto con el bloque `[stats]` listo para `config/kb_discord_auth-common.toml`. Solo se guarda su SHA-256; al regenerarla, la anterior deja de valer.
+  2. El mod envía `POST <PANEL_URL>/api/integrations/minecraft/stats` con `Authorization: Bearer <key>`. Esta ruta va fuera de la sesión del panel; con nginx/Caddy basta el proxy general (usa HTTPS si el servidor de Minecraft está en otra máquina). Límites: 1 MB por petición, 500 jugadores y 30 peticiones por minuto y key. El contrato completo está en `kb_discord_auth/docs/stats-contract.md`.
+  3. Crea uno o varios rankings: canal, estadísticas, total y/o semanal, top (1–25), frecuencia (5–1440 min), título (`{server}` = `serverName` del mod), solo vinculados y jugadores excluidos (UUID o nombre). El bot publica un mensaje y lo edita; si lo borran, lo vuelve a publicar.
+  - La semana empieza el lunes a las 00:00 en `TIMEZONE`. Quien aparece por primera vez a mitad de semana empieza en 0, y si un total baja (se borró `world/stats`) el semanal sigue contando desde 0.
+  - Si no llega nada del servidor en 15 min (3 envíos del mod), el ranking avisa de "sin datos recientes". El mod solo envía cuando hay jugadores conectados, así que con el servidor vacío el aviso también aparece.
+  - `/ranking estadistica periodo [servidor]` responde en privado con el top 10 y la posición de quien lo usa.
