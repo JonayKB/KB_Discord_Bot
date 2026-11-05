@@ -317,3 +317,23 @@ export interface NewsState {
     feed: { updatedAt: string; messages: NewsMessage[] } | null;
     lastError: string | null;
 }
+
+export type McStatKey = 'playTimeSeconds' | 'deaths' | 'mobKills' | 'distanceCm' | 'advancements';
+export type McStats = Partial<Record<McStatKey, number>>;
+export type McPeriod = 'total' | 'weekly';
+export interface McPlayerStats { uuid: string; name: string; discordId: string | null; takenAt: number; updatedAt: number; total: McStats; weekly: McStats }
+export interface McLeaderboard {
+    id: number; serverId: number; enabled: boolean; channelId: string; messageId: string | null; stats: McStatKey[]; periods: McPeriod[];
+    top: number; intervalMin: number; title: string; linkedOnly: boolean; exclude: string[]; lastPostedAt: number | null; lastError: string | null; createdAt: number;
+}
+export interface McStatsOverview {
+    endpoint: string;
+    key: { configured: boolean; createdAt: number | null };
+    displayName: string | null;
+    lastPushAt: number | null;
+    stale: boolean;
+    weekStart: number;
+    timezone: string;
+    players: McPlayerStats[];
+    leaderboards: McLeaderboard[];
+}

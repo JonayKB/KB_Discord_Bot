@@ -320,6 +320,59 @@ const MIGRATIONS: string[] = [
     ALTER TABLE messages ADD COLUMN sent_by_id TEXT;
     ALTER TABLE messages ADD COLUMN sent_by_name TEXT;
     `,
+    /* v8: estadísticas de jugadores que envía el mod kb_discord_auth + rankings en Discord */ `
+    ALTER TABLE game_servers ADD COLUMN mc_display_name TEXT;   -- server.name del último envío del mod
+    ALTER TABLE game_servers ADD COLUMN mc_last_push_at INTEGER; -- cuándo llegó el último envío
+
+    -- Una API key por servidor de Minecraft (solo se guarda su SHA-256).
+    CREATE TABLE mc_stats_keys (
+        server_id  INTEGER PRIMARY KEY REFERENCES game_servers (id) ON DELETE CASCADE,
+        key_hash   TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+    );
+
+    -- Último total acumulado de cada jugador en cada servidor.
+    CREATE TABLE mc_stats_players (
+        server_id  INTEGER NOT NULL REFERENCES game_servers (id) ON DELETE CASCADE,
+        uuid       TEXT NOT NULL,
+        name       TEXT NOT NULL,
+        discord_id TEXT,
+        taken_at   INTEGER NOT NULL,
+        stats      TEXT NOT NULL,   -- JSON con los totales
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (server_id, uuid)
+    );
+    CREATE INDEX idx_mc_stats_discord ON mc_stats_players (discord_id);
+
+    -- Totales al empezar cada semana: semanal = total actual − base.
+    CREATE TABLE mc_stats_weekly_base (
+        server_id  INTEGER NOT NULL REFERENCES game_servers (id) ON DELETE CASCADE,
+        week_start INTEGER NOT NULL,  -- ms epoch del lunes 00:00 en TIMEZONE
+        uuid       TEXT NOT NULL,
+        stats      TEXT NOT NULL,
+        PRIMARY KEY (server_id, week_start, uuid)
+    );
+
+    -- Rankings publicados en Discord (un mensaje que se edita).
+    CREATE TABLE mc_leaderboards (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        server_id      INTEGER NOT NULL REFERENCES game_servers (id) ON DELETE CASCADE,
+        enabled        INTEGER NOT NULL DEFAULT 1,
+        channel_id     TEXT NOT NULL,
+        message_id     TEXT,
+        stats          TEXT NOT NULL,                        -- JSON: claves de estadística
+        periods        TEXT NOT NULL DEFAULT '["total","weekly"]',
+        top            INTEGER NOT NULL DEFAULT 10,
+        interval_min   INTEGER NOT NULL DEFAULT 15,
+        title          TEXT NOT NULL DEFAULT '🏆 {server}',
+        linked_only    INTEGER NOT NULL DEFAULT 0,
+        exclude        TEXT NOT NULL DEFAULT '[]',           -- JSON: UUID o nombres
+        last_posted_at INTEGER,
+        last_error     TEXT,
+        created_at     INTEGER NOT NULL
+    );
+    CREATE INDEX idx_mc_leaderboards_server ON mc_leaderboards (server_id);
+    `,
 ];
 
 export function openDb(file = path.join(DATA_DIR, 'bot.db')): DB {

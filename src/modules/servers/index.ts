@@ -1,12 +1,18 @@
 import { Router } from 'express';
 import { HttpError, asyncRoute, bool, int, str } from '../../core/http';
 import type { BotModule } from '../../core/module';
+import { Logger } from '../../utils/Logger';
 import { queryServer, type ServerKind } from './query';
 import { MAX_INTERVAL, MIN_INTERVAL, type GameServerInput, type ServersService } from './service';
 import type { WhitelistService } from './whitelist';
+import { PERIODS, STAT_KEYS, type Period, type StatKey } from './ranking';
+import type { LeaderboardInput, McStatsService } from './stats';
 
 export { ServersService } from './service';
 export { WhitelistService } from './whitelist';
+export { McStatsService } from './stats';
+
+const logger = new Logger('Module:servers');
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -36,7 +42,33 @@ function parseServer(body: any): GameServerInput {
     };
 }
 
-export function createServersModule(service: ServersService, whitelist: WhitelistService): BotModule {
+function parseLeaderboard(body: any): LeaderboardInput {
+    if (!body || typeof body !== 'object') throw new HttpError(400, 'Datos del ranking no válidos');
+    const pick = <T extends string>(v: unknown, allowed: readonly T[], field: string): T[] => {
+        if (v === undefined) return [...allowed];
+        if (!Array.isArray(v) || v.some(x => !allowed.includes(x))) throw new HttpError(400, `"${field}" no es válido`);
+        const out = allowed.filter(a => v.includes(a));
+        if (!out.length) throw new HttpError(400, `Elige al menos un valor en "${field}"`);
+        return out;
+    };
+    const exclude = body.exclude === undefined ? [] : body.exclude;
+    if (!Array.isArray(exclude) || exclude.length > 200 || exclude.some((x: unknown) => typeof x !== 'string' || x.length > 64)) {
+        throw new HttpError(400, '"exclude" debe ser una lista de UUID o nombres');
+    }
+    return {
+        enabled: body.enabled === undefined ? true : bool(body.enabled),
+        channelId: str(body.channelId, 'channelId', { required: true, max: 32 }),
+        stats: pick<StatKey>(body.stats, STAT_KEYS, 'stats'),
+        periods: pick<Period>(body.periods, PERIODS, 'periods'),
+        top: body.top === undefined ? 10 : int(body.top, 'top', { min: 1, max: 25 }),
+        intervalMin: body.intervalMin === undefined ? 15 : int(body.intervalMin, 'intervalMin', { min: 5, max: 1440 }),
+        title: (str(body.title, 'title', { max: 200 }).trim() || '🏆 {server}'),
+        linkedOnly: bool(body.linkedOnly),
+        exclude: [...new Set(exclude.map((x: string) => x.trim()).filter(Boolean))] as string[],
+    };
+}
+
+export function createServersModule(service: ServersService, whitelist: WhitelistService, stats: McStatsService): BotModule {
     const router = Router();
     const sid = (v: unknown) => int(v, 'id', { min: 1 });
     const who = (req: any) => String(req.session?.username ?? 'panel');
@@ -139,6 +171,55 @@ export function createServersModule(service: ServersService, whitelist: Whitelis
         res.json(names.map(n => ({ name: n, userId: linked.get(n.toLowerCase())?.userId ?? null, username: linked.get(n.toLowerCase())?.username ?? null })));
     }));
 
+    // ── Estadísticas de jugadores (mod kb_discord_auth) y rankings ──
+    const mcServer = (v: unknown) => {
+        const s = service.require(sid(v));
+        if (s.type !== 'minecraft') throw new HttpError(400, 'Las estadísticas de jugadores solo están disponibles en Minecraft.');
+        return s;
+    };
+
+    router.get('/:id/stats', (req, res) => res.json(stats.overview(mcServer(req.params.id).id)));
+
+    /** Genera o regenera la API key (se muestra una sola vez). */
+    router.post('/:id/stats/key', (req, res) => {
+        const s = mcServer(req.params.id);
+        const key = stats.generateKey(s.id);
+        logger.info(`🔑 ${who(req)} ha generado una API key de estadísticas para "${s.name}"`);
+        res.json({ key, endpoint: stats.endpoint() });
+    });
+
+    router.delete('/:id/stats/key', (req, res) => {
+        const s = mcServer(req.params.id);
+        stats.revokeKey(s.id);
+        logger.info(`🔑 ${who(req)} ha revocado la API key de estadísticas de "${s.name}"`);
+        res.json({ ok: true });
+    });
+
+    router.delete('/:id/stats/players/:uuid', (req, res) => {
+        stats.deletePlayer(mcServer(req.params.id).id, String(req.params.uuid));
+        res.json({ ok: true });
+    });
+
+    router.post('/:id/leaderboards', (req, res) => {
+        res.status(201).json(stats.createLeaderboard(mcServer(req.params.id).id, parseLeaderboard(req.body)));
+    });
+
+    router.put('/:id/leaderboards/:lbId', (req, res) => {
+        res.json(stats.updateLeaderboard(mcServer(req.params.id).id, int(req.params.lbId, 'lbId', { min: 1 }), parseLeaderboard(req.body)));
+    });
+
+    router.delete('/:id/leaderboards/:lbId', (req, res) => {
+        stats.deleteLeaderboard(mcServer(req.params.id).id, int(req.params.lbId, 'lbId', { min: 1 }));
+        res.json({ ok: true });
+    });
+
+    router.post('/:id/leaderboards/:lbId/publish', asyncRoute(async (req, res) => {
+        const s = mcServer(req.params.id);
+        const lbId = int(req.params.lbId, 'lbId', { min: 1 });
+        stats.leaderboard(lbId, s.id);
+        res.json(await stats.publishLeaderboard(lbId));
+    }));
+
     router.post('/:id/check', asyncRoute(async (req, res) => {
         res.json(await service.check(int(req.params.id, 'id', { min: 1 })));
     }));
@@ -155,13 +236,14 @@ export function createServersModule(service: ServersService, whitelist: Whitelis
     return {
         id: 'servers',
         name: 'Servidores de juego',
-        description: 'Consulta el estado de tus servidores de Minecraft y Hytale (jugadores, latencia, TPS…), lo muestra en el panel y mantiene actualizado un mensaje de estado en Discord. En Minecraft, consola RCON y whitelist automática a partir de las confirmaciones.',
+        description: 'Consulta el estado de tus servidores de Minecraft y Hytale (jugadores, latencia, TPS…), lo muestra en el panel y mantiene actualizado un mensaje de estado en Discord. En Minecraft, consola RCON y whitelist automática a partir de las confirmaciones, y rankings de jugadores con las estadísticas que envía el mod kb_discord_auth.',
         router,
         start(ctx) {
             service.start();
             whitelist.start();
+            stats.start();
             ctx.listen('guildMemberRemove', m => whitelist.onMemberLeave(m.id));
-            ctx.onStop(() => { service.stop(); whitelist.stop(); });
+            ctx.onStop(() => { service.stop(); whitelist.stop(); stats.stop(); });
         },
     };
 }

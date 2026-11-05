@@ -52,7 +52,7 @@ async function main() {
     const { createConfirmationsModule } = await import(src('modules/confirmations'));
     const { SchedulerService } = await import(src('modules/scheduler/service'));
     const { createSchedulerModule } = await import(src('modules/scheduler'));
-    const { ServersService, WhitelistService, createServersModule } = await import(src('modules/servers'));
+    const { McStatsService, ServersService, WhitelistService, createServersModule } = await import(src('modules/servers'));
     const { ReactionRolesService, createReactionsModule } = await import(src('modules/reactions'));
     const { WelcomeService, createWelcomeModule } = await import(src('modules/welcome'));
     const { ModerationService, createModerationModule } = await import(src('modules/moderation'));
@@ -87,12 +87,13 @@ async function main() {
     const scheduler = new SchedulerService(db, messages, confirmations);
     const servers = new ServersService(mock.client, db, confirmations);
     const reactions = new ReactionRolesService(mock.client, db);
-    setServices({ messages, confirmations, servers, reactions });
+    const mcStats = new McStatsService(mock.client, db);
+    setServices({ messages, confirmations, servers, mcStats, reactions });
     manager.register(createMessagesModule(messages, db));
     manager.register(createInboxModule(inbox, messages, db));
     manager.register(createSchedulerModule(scheduler));
     manager.register(createConfirmationsModule(confirmations));
-    manager.register(createServersModule(servers, new WhitelistService(mock.client, db, servers, confirmations)));
+    manager.register(createServersModule(servers, new WhitelistService(mock.client, db, servers, confirmations), mcStats));
     manager.register(createReactionsModule(reactions));
     manager.register(createWelcomeModule(new WelcomeService(mock.client, db, messages)));
     manager.register(createModerationModule(new ModerationService(mock.client, db, messages)));
@@ -108,6 +109,21 @@ async function main() {
     addServer.run('MCKB Survival', 'minecraft', 38250, 38251, 'C_GEN', 'M_STATUS', Date.now());
     addServer.run('Hytale MCKB', 'hytale', null, 38252, null, null, Date.now());
     await manager.startEnabled();
+
+    // Estadísticas de jugadores de ejemplo (como si las enviara el mod kb_discord_auth).
+    mcStats.generateKey(1);
+    const demoPlayers: Array<[string, string | null]> = [['Steve_MC', '100'], ['AlexG', '101'], ['LunaCraft', '103'], ['ZoeMC', '105'], ['Herobrine', null], ['Pepe_*', null]];
+    const statsOf = (i: number, f: number) => ({
+        playTimeSeconds: Math.round((40 - i * 5) * 3600 * f), deaths: Math.round((12 + i * 3) * f), mobKills: Math.round((900 - i * 120) * f),
+        distanceCm: Math.round((3_500_000 - i * 400_000) * f), advancements: Math.round((60 - i * 7) * f),
+    });
+    const toPlayers = (f: number, at: number) => demoPlayers.map(([name, discordId], i) => ({
+        uuid: `00000000-0000-3000-8000-${String(i + 1).padStart(12, '0')}`, name, discordId, online: i < 3, takenAt: at + i, stats: statsOf(i, f),
+    }));
+    mcStats.ingest(1, { version: 1, server: { id: 'demo', name: 'MCKB Survival' }, sentAt: Date.now(), players: toPlayers(0.8, Date.now() - 3 * 86_400_000) });
+    mcStats.ingest(1, { version: 1, server: { id: 'demo', name: 'MCKB Survival' }, sentAt: Date.now(), players: toPlayers(1, Date.now() - 60_000) });
+    db.prepare("UPDATE mc_stats_weekly_base SET stats = json_set(stats, '$.playTimeSeconds', CAST(json_extract(stats, '$.playTimeSeconds') * 0.7 AS INTEGER), '$.mobKills', CAST(json_extract(stats, '$.mobKills') * 0.6 AS INTEGER))").run();
+    mcStats.createLeaderboard(1, { enabled: true, channelId: 'C_GEN', stats: ['playTimeSeconds', 'deaths', 'mobKills', 'distanceCm', 'advancements'], periods: ['total', 'weekly'], top: 10, intervalMin: 15, title: '🏆 {server}', linkedOnly: false, exclude: [] });
 
     // Historial de ejemplo para las gráficas: 7 días, una muestra cada 5 min, con una caída hace 3 h.
     const addSample = db.prepare('INSERT INTO server_samples (server_id, ts, online, players, max_players, latency_ms, tps, mspt, cpu) VALUES (1, ?, ?, ?, 20, ?, ?, ?, ?)');

@@ -1,6 +1,7 @@
 import type { ConfirmationService } from '../modules/confirmations/service';
 import type { MessagesService } from '../modules/messages/service';
 import type { ServersService } from '../modules/servers/service';
+import type { McStatsService } from '../modules/servers/stats';
 import type { ReactionRolesService } from '../modules/reactions/service';
 
 /**
@@ -11,6 +12,7 @@ export interface Services {
     messages: MessagesService;
     confirmations: ConfirmationService;
     servers: ServersService;
+    mcStats: McStatsService;
     reactions: ReactionRolesService;
 }
 
