@@ -1,13 +1,13 @@
 import crypto from 'node:crypto';
 import { Cron } from 'croner';
-import type { Client } from 'discord.js';
+import { MessageFlags, type Client, type Interaction } from 'discord.js';
 import type { DB } from '../../core/db';
 import { getSetting, setSetting } from '../../core/db';
 import { publish } from '../../core/bus';
 import { env } from '../../core/config';
 import { HttpError, parseJson } from '../../core/http';
 import { Logger } from '../../utils/Logger';
-import { PERIODS, STAT_KEYS, renderRanking, sortRows, type Period, type RankRow, type StatKey, type Stats } from './ranking';
+import { PERIODS, STAT_KEYS, controlPrefix, parseControl, renderRanking, sortRows, type Period, type RankRow, type RankingMessage, type StatKey, type Stats } from './ranking';
 
 const logger = new Logger('McStats');
 
@@ -491,21 +491,73 @@ export class McStatsService {
 
     private inGuild = (id: string) => !!this.client.guilds.cache.get(env.guildId)?.members.cache.has(id);
 
-    /** Contenido del mensaje de un ranking. */
-    render(lb: Leaderboard, now = Date.now()) {
+    /**
+     * Mensaje de un ranking. Sin `view` es el mensaje público (primera categoría y primer periodo);
+     * con `view` es la vista privada de quien pulsa el menú o los botones.
+     */
+    render(lb: Leaderboard, view?: { stat: StatKey; period: Period; viewerId?: string }, now = Date.now()): RankingMessage {
         const info = this.serverInfo(lb.serverId);
         const serverName = info?.displayName ?? info?.name ?? 'Minecraft';
-        const players = this.players(lb.serverId);
+        const stat = view && lb.stats.includes(view.stat) ? view.stat : lb.stats[0];
+        const period = view && lb.periods.includes(view.period) ? view.period : lb.periods[0];
         return renderRanking({
+            controls: controlPrefix('mclb', lb.id),
             title: lb.title.split('{server}').join(serverName),
             stats: lb.stats,
             periods: lb.periods,
             top: lb.top,
-            rows: (key, period) => this.ranking(lb.serverId, key, period, lb, players),
+            stat,
+            period,
+            rows: this.ranking(lb.serverId, stat, period, lb),
             inGuild: this.inGuild,
             updatedAt: now,
             stale: this.isStale(info?.lastPushAt ?? null, now),
+            viewerId: view?.viewerId,
         });
+    }
+
+    /** Top 10 de un servidor para /ranking: todas las categorías y los dos periodos, sin filtros. */
+    renderServer(serverId: number, view: { stat: StatKey; period: Period; viewerId?: string }, now = Date.now()): RankingMessage | null {
+        const info = this.serverInfo(serverId);
+        if (!info) return null;
+        return renderRanking({
+            controls: controlPrefix('mcrk', serverId),
+            title: `🏆 ${info.displayName ?? info.name}`,
+            stats: [...STAT_KEYS],
+            periods: [...PERIODS],
+            top: 10,
+            stat: view.stat,
+            period: view.period,
+            rows: this.ranking(serverId, view.stat, view.period),
+            inGuild: this.inGuild,
+            updatedAt: now,
+            stale: this.isStale(info.lastPushAt, now),
+            viewerId: view.viewerId,
+        });
+    }
+
+    /**
+     * Menú de categoría y botones de periodo. En el mensaje público de un ranking se responde con una vista privada
+     * (así nadie le cambia el ranking a los demás); en una vista privada (o en /ranking) se actualiza ella misma.
+     */
+    async handleInteraction(i: Interaction): Promise<void> {
+        if (!(i.isButton() || i.isStringSelectMenu()) || !/^mc(lb|rk):/.test(i.customId)) return;
+        const control = parseControl(i.customId, i.isStringSelectMenu() ? i.values : []);
+        const view = control && { stat: control.stat, period: control.period, viewerId: i.user.id };
+        let message: RankingMessage | null = null;
+        if (control?.source === 'mclb') {
+            const lb = this.leaderboards().find(x => x.id === control.id);
+            if (lb) message = this.render(lb, view!);
+        } else if (control?.source === 'mcrk') {
+            message = this.renderServer(control.id, view!);
+        }
+        if (!message) {
+            await i.reply({ content: 'Este ranking ya no existe.', flags: MessageFlags.Ephemeral });
+            return;
+        }
+        const payload = { ...message, allowedMentions: { parse: [] as never[] } };
+        if (i.message.flags.has(MessageFlags.Ephemeral)) await i.update(payload);
+        else await i.reply({ ...payload, flags: MessageFlags.Ephemeral });
     }
 
     /** Publica o edita el mensaje del ranking. Si el mensaje ya no existe, lo vuelve a publicar. */

@@ -139,7 +139,7 @@ function Leaderboards({ server, data, running, channels, onChange }: { server: G
                 <b>Rankings en Discord</b>
                 <button className="btn sm" disabled={!running} onClick={() => setEditing('new')}><Icon name="plus" size={14} /> Nuevo ranking</button>
             </div>
-            {data.leaderboards.length === 0 && <div className="muted small">Un mensaje en un canal con el top de jugadores, que el bot va editando.</div>}
+            {data.leaderboards.length === 0 && <div className="muted small">Un mensaje en un canal con el top de jugadores, que el bot va editando. Tiene un menú para cambiar de categoría y botones para ver el total o la semana.</div>}
             {data.leaderboards.map(lb => (
                 <div key={lb.id} className="tile stack" style={{ gap: 6 }}>
                     <div className="row between wrap">
@@ -216,7 +216,7 @@ function LeaderboardEditor({ server, initial, channels, onClose, onSaved }: {
                 <div className="field stack" style={{ gap: 5 }}><span style={{ fontWeight: 600, fontSize: 13 }}>Periodo</span>
                     <div className="row wrap">{(['total', 'weekly'] as McPeriod[]).map(p => <Check key={p} label={PERIOD_LABEL[p]} checked={f.periods.includes(p)} onChange={v => set('periods', (['total', 'weekly'] as McPeriod[]).filter(x => toggleIn(f.periods, p, v).includes(x)))} />)}</div>
                 </div>
-                <span className="hint">La semana empieza el lunes a las 00:00.</span>
+                <span className="hint">El mensaje muestra la primera categoría y el primer periodo marcados. Con el menú y los botones, cada persona ve en privado la categoría y el periodo que elija, con su posición. La semana empieza el lunes a las 00:00.</span>
                 <div className="row wrap">
                     <label className="field" style={{ width: 140 }}>Top<input type="number" min={1} max={25} value={f.top} onChange={e => set('top', Number(e.target.value))} /></label>
                     <label className="field" style={{ width: 200 }}>Actualizar cada (min)<input type="number" min={5} max={1440} value={f.intervalMin} onChange={e => set('intervalMin', Number(e.target.value))} /></label>

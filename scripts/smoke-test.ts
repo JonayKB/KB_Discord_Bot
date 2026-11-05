@@ -551,26 +551,68 @@ async function main() {
         assert.ok(pub.messageId);
         assert.equal(channelsSent.length, sent0 + 1, 'se publica un mensaje');
         const msg = channelsSent.at(-1);
-        assert.match(msg.content, /^## 🏆 KB Survival\n-# Actualizado <t:\d+:R>$/);
         assert.deepEqual(msg.allowedMentions, { parse: [] });
-        const play = msg.embeds[0].data;
-        assert.equal(play.title, '⏱️ Tiempo jugado');
-        assert.deepEqual(play.fields.map((f: any) => f.name), ['Total', 'Esta semana']);
-        const totalLines = play.fields[0].value.split('\n');
+        assert.equal(msg.embeds.length, 1, 'un solo embed');
+        const view = msg.embeds[0].data;
+        assert.equal(view.title, '🏆 KB Survival');
+        const [heading, list, updated] = view.description.split('\n\n');
+        assert.equal(heading, '### ⏱️ Tiempo jugado · Total', 'por defecto, la primera categoría y el primer periodo');
+        const totalLines = list.split('\n');
         assert.match(totalLines[0], /^🥇 \*\*Al\\_ex\\\*\*\* · 2h 0m$/, 'sin miembro en el Discord: solo el nombre, con Markdown escapado');
         assert.match(totalLines[1], /^🥈 <@U1> \(Steve\) · 16m$/, 'con miembro: mención y nombre de Minecraft');
-        assert.ok(!play.fields[0].value.includes('Tester'), 'excluidos por nombre');
-        assert.equal(msg.embeds[1].data.title, '💀 Más muertes');
-        assert.match(msg.embeds[3].data.fields[0].value, /2\.5 km/);
+        assert.ok(!list.includes('Tester'), 'excluidos por nombre');
+        assert.match(updated, /^-# Actualizado <t:\d+:R>$/);
+        assert.ok(!view.description.includes('Tu posición'), 'el mensaje público no muestra posiciones');
+        const [selectRow, buttonRow] = msg.components.map((c: any) => c.toJSON());
+        const select = selectRow.components[0];
+        assert.equal(select.custom_id, `mclb:${lb.id}:s:total`);
+        assert.deepEqual(select.options.map((o: any) => o.value), ['playTimeSeconds', 'deaths', 'mobKills', 'distanceCm', 'advancements']);
+        assert.equal(select.options.find((o: any) => o.default)?.value, 'playTimeSeconds');
+        assert.deepEqual(buttonRow.components.map((b: any) => [b.label, b.custom_id, b.style]),
+            [['Total', `mclb:${lb.id}:p:playTimeSeconds:total`, 1], ['Esta semana', `mclb:${lb.id}:p:playTimeSeconds:weekly`, 2]]);
+        ok('ranking: un solo embed con menú de categorías y botones de periodo');
+
+        // Al usar los controles del mensaje público, cada uno recibe su vista privada; dentro de ella se va actualizando.
+        const { MessageFlags } = await import('discord.js');
+        const useControl = async (customId: string, userId: string, opts: { values?: string[]; ephemeral?: boolean } = {}) => {
+            const out: any = {};
+            await mcStats.handleInteraction({
+                customId, values: opts.values ?? [], user: { id: userId },
+                isButton: () => !opts.values, isStringSelectMenu: () => !!opts.values,
+                message: { flags: { has: (f: number) => f === MessageFlags.Ephemeral && !!opts.ephemeral } },
+                reply: async (o: any) => { out.reply = o; }, update: async (o: any) => { out.update = o; },
+            } as any);
+            return out;
+        };
+        const edits0 = counterEdits.length;
+        const picked = await useControl(`mclb:${lb.id}:s:total`, 'U1', { values: ['distanceCm'] });
+        assert.equal(picked.reply.flags, MessageFlags.Ephemeral, 'respuesta privada');
+        assert.equal(counterEdits.length, edits0, 'el mensaje público no cambia');
+        const pickedDesc = picked.reply.embeds[0].data.description;
+        assert.match(pickedDesc, /^### 🧭 Distancia recorrida · Total/);
+        assert.match(pickedDesc, /2\.5 km/);
+        assert.match(pickedDesc, /Tu posición: \*\*#1\*\* de 2 · 2\.5 km/);
+        const pickedButtons = picked.reply.components[1].toJSON().components;
+        assert.equal(pickedButtons[1].custom_id, `mclb:${lb.id}:p:distanceCm:weekly`, 'los botones conservan la categoría elegida');
+        const weeklyView = await useControl(pickedButtons[1].custom_id, 'U1', { ephemeral: true });
+        assert.ok(weeklyView.update && !weeklyView.reply, 'en la vista privada se actualiza ella misma');
+        assert.match(weeklyView.update.embeds[0].data.description, /^### 🧭 Distancia recorrida · Esta semana/);
+        assert.equal(weeklyView.update.components[0].toJSON().components[0].custom_id, `mclb:${lb.id}:s:weekly`, 'el menú conserva el periodo');
+        const stranger = await useControl(`mclb:${lb.id}:p:deaths:total`, 'U3');
+        assert.match(stranger.reply.embeds[0].data.description, /No apareces en esta categoría/);
+        assert.match((await useControl('mclb:99999:p:deaths:total', 'U1')).reply.content, /ya no existe/);
+        assert.match((await useControl(`mclb:${lb.id}:p:jumps:total`, 'U1')).reply.content, /ya no existe/, 'custom_id manipulado');
+        ok('menú y botones: vista privada por persona con su posición, sin tocar el mensaje público');
 
         const edits1 = counterEdits.length;
         await call('PUT', `/api/servers/${mcId}/leaderboards/${lb.id}`, { ...lb, periods: ['weekly'], stats: ['playTimeSeconds'], linkedOnly: true, title: 'Top {server}' });
         await call('POST', `/api/servers/${mcId}/leaderboards/${lb.id}/publish`);
         assert.equal(channelsSent.length, sent0 + 1, 'las siguientes veces se edita el mismo mensaje');
         const edited = counterEdits.slice(edits1).at(-1);
-        assert.match(edited.content, /^## Top KB Survival/);
-        assert.equal(edited.embeds.length, 1);
-        assert.equal(edited.embeds[0].data.description, '🥇 <@U1> (Steve) · 16m', 'solo vinculados y una columna');
+        assert.equal(edited.content, '', 'se limpia el contenido del formato anterior');
+        assert.equal(edited.embeds[0].data.title, 'Top KB Survival');
+        assert.equal(edited.embeds[0].data.description.split('\n\n')[1], '🥇 <@U1> (Steve) · 16m', 'solo vinculados');
+        assert.equal(edited.components.length, 0, 'con una sola categoría y un solo periodo no hay controles');
 
         db.prepare('UPDATE mc_leaderboards SET message_id = ? WHERE id = ?').run('9_gone', lb.id);
         const repost = (await call('POST', `/api/servers/${mcId}/leaderboards/${lb.id}/publish`)).json;
@@ -578,18 +620,30 @@ async function main() {
         assert.notEqual(repost.messageId, '9_gone');
         db.prepare('UPDATE game_servers SET mc_last_push_at = ? WHERE id = ?').run(Date.now() - 3600_000, mcId);
         await call('POST', `/api/servers/${mcId}/leaderboards/${lb.id}/publish`);
-        assert.match(counterEdits.at(-1).content, /⚠ sin datos recientes del servidor/);
-        ok('ranking: publicar, editar, volver a publicar, filtros, menciones y aviso de datos viejos');
+        assert.match(counterEdits.at(-1).embeds[0].data.description, /⚠ sin datos recientes del servidor/);
+        ok('ranking: editar, volver a publicar, filtros y aviso de datos viejos');
 
         // /ranking
         const { default: rankingCmd } = await import(src('commands/stats/ranking'));
         let replied: any = null;
         await rankingCmd.execute({
-            options: { getString: (n: string) => (n === 'estadistica' ? 'playTimeSeconds' : 'total'), getInteger: () => null },
+            options: { getString: () => null, getInteger: () => null },
             client, user: { id: 'U1' }, reply: async (o: any) => { replied = o; },
         } as any);
+        assert.equal(replied.flags, MessageFlags.Ephemeral);
+        assert.equal(replied.embeds[0].data.title, '🏆 KB Survival');
+        assert.match(replied.embeds[0].data.description, /^### ⏱️ Tiempo jugado · Total/, 'sin opciones: tiempo jugado y total');
         assert.match(replied.embeds[0].data.description, /Tu posición: \*\*#2\*\* de 3 · 16m/);
-        ok('/ranking: top y posición de quien lo ejecuta');
+        const cmdSelect = replied.components[0].toJSON().components[0];
+        assert.equal(cmdSelect.custom_id, `mcrk:${mcId}:s:total`);
+        assert.equal(cmdSelect.options.length, 5, 'todas las categorías');
+        const cmdWeekly = replied.components[1].toJSON().components[1].custom_id;
+        const fromCmd = await useControl(cmdWeekly, 'U1', { ephemeral: true });
+        assert.match(fromCmd.update.embeds[0].data.description, /^### ⏱️ Tiempo jugado · Esta semana/, 'los botones de /ranking actualizan la respuesta');
+        const fromCmdSelect = await useControl(`mcrk:${mcId}:s:weekly`, 'U1', { values: ['deaths'], ephemeral: true });
+        assert.match(fromCmdSelect.update.embeds[0].data.description, /^### 💀 Más muertes · Esta semana/);
+        assert.match((await useControl('mcrk:99999:p:deaths:total', 'U1', { ephemeral: true })).reply.content, /ya no existe/);
+        ok('/ranking: vista privada con menú, botones y posición de quien lo ejecuta');
 
         // Rate limit, regenerar y borrar
         const old = KEY;
