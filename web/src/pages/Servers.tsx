@@ -219,7 +219,7 @@ function ServerCard({ server: s, busy, running, channelName, channels, onCheck, 
                     <div className="muted small">
                         {s.messageId
                             ? <>Se actualiza en <b>#{channelName ?? s.channelId}</b> con cada consulta.</>
-                            : 'Un mensaje fijo en un canal con el estado, los jugadores y el rendimiento del servidor.'}
+                            : 'Un mensaje fijo en un canal con la IP, la apertura, el estado, los jugadores y el rendimiento del servidor.'}
                     </div>
                 </div>
                 <div className="row">
@@ -326,18 +326,36 @@ function ServerStats({ server }: { server: GameServer }) {
 
 // ───────────────────────────── Editor ─────────────────────────────
 
-type Draft = { name: string; type: ServerKind; host: string; port: string; apiPort: string; enabled: boolean; linkPlayers: boolean };
+type Draft = {
+    name: string; type: ServerKind; host: string; port: string; apiPort: string; enabled: boolean; linkPlayers: boolean;
+    publicAddress: string; opensAt: string; inviteUrl: string; infoText: string;
+};
+
+/** ms epoch ↔ valor de <input type="datetime-local"> (hora local del navegador). */
+const toLocalInput = (ms: number | null) => {
+    if (!ms) return '';
+    const d = new Date(ms);
+    return new Date(ms - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+};
+const fromLocalInput = (v: string) => (v ? new Date(v).getTime() : null);
 
 function ServerEditor({ initial, onClose, onSaved }: { initial: GameServer | null; onClose: () => void; onSaved: () => void }) {
     const [d, setD] = useState<Draft>(() => initial
-        ? { name: initial.name, type: initial.type, host: initial.host, port: initial.port ? String(initial.port) : '', apiPort: initial.apiPort ? String(initial.apiPort) : '', enabled: initial.enabled, linkPlayers: initial.linkPlayers }
-        : { name: '', type: 'minecraft', host: '', port: '', apiPort: '', enabled: true, linkPlayers: true });
+        ? {
+            name: initial.name, type: initial.type, host: initial.host, port: initial.port ? String(initial.port) : '', apiPort: initial.apiPort ? String(initial.apiPort) : '',
+            enabled: initial.enabled, linkPlayers: initial.linkPlayers,
+            publicAddress: initial.publicAddress ?? '', opensAt: toLocalInput(initial.opensAt), inviteUrl: initial.inviteUrl ?? '', infoText: initial.infoText ?? '',
+        }
+        : { name: '', type: 'minecraft', host: '', port: '', apiPort: '', enabled: true, linkPlayers: true, publicAddress: '', opensAt: '', inviteUrl: '', infoText: '' });
     const [saving, setSaving] = useState(false);
     const [testing, setTesting] = useState(false);
     const [test, setTest] = useState<ServerStatus | null>(null);
     const set = (patch: Partial<Draft>) => { setD(x => ({ ...x, ...patch })); setTest(null); };
 
-    const body = () => ({ ...d, name: d.name.trim(), host: d.host.trim(), port: d.port.trim() || null, apiPort: d.apiPort.trim() || null });
+    const body = () => ({
+        ...d, name: d.name.trim(), host: d.host.trim(), port: d.port.trim() || null, apiPort: d.apiPort.trim() || null,
+        publicAddress: d.publicAddress.trim(), opensAt: fromLocalInput(d.opensAt), inviteUrl: d.inviteUrl.trim(), infoText: d.infoText.trim(),
+    });
     const valid = () => {
         if (!d.host.trim()) { toast.error('Indica la IP o el dominio.'); return false; }
         if (d.type === 'hytale' && !d.apiPort.trim()) { toast.error('Para Hytale hace falta el puerto de la API.'); return false; }
@@ -391,6 +409,28 @@ function ServerEditor({ initial, onClose, onSaved }: { initial: GameServer | nul
             <Check checked={d.linkPlayers} onChange={linkPlayers => set({ linkPlayers })} label="Asociar jugadores con su usuario de Discord"
                 hint="Usa lo que respondieron en las campañas de confirmación (p. ej. su nombre de Minecraft) para mencionarlos en el mensaje de estado." />
             <Check checked={d.enabled} onChange={enabled => set({ enabled })} label="Consultar este servidor" />
+
+            <div className="sep" />
+            <div>
+                <b>Información en el mensaje de Discord</b>
+                <div className="hint">Todo es opcional. Lo que rellenes aparece al principio del mensaje de estado.</div>
+            </div>
+            <label className="field">IP para los jugadores
+                <input type="text" maxLength={100} value={d.publicAddress} onChange={e => set({ publicAddress: e.target.value })} placeholder={d.host.trim() || 'minecraft.tudominio.com'} spellCheck={false} />
+                <span className="hint">Se muestra en un bloque fácil de copiar. Vacío = no se muestra.</span>
+            </label>
+            <div className="grid cols-2">
+                <label className="field">Fecha y hora de apertura
+                    <input type="datetime-local" value={d.opensAt} onChange={e => set({ opensAt: e.target.value })} />
+                </label>
+                <label className="field">Enlace de invitación
+                    <input type="text" maxLength={300} value={d.inviteUrl} onChange={e => set({ inviteUrl: e.target.value })} placeholder="https://discord.gg/…" spellCheck={false} />
+                </label>
+            </div>
+            <span className="hint" style={{ marginTop: -6 }}>Hasta la apertura se muestra la fecha, la hora y la cuenta atrás (cada uno la ve en su zona horaria) y, si el servidor está apagado, aparece como «Próximamente» en vez de «Offline». El enlace sale como botón debajo del mensaje.</span>
+            <label className="field">Texto adicional
+                <textarea rows={3} maxLength={1000} value={d.infoText} onChange={e => set({ infoText: e.target.value })} placeholder="Normas, modpack, cómo entrar… (admite formato de Discord: **negrita**, enlaces…)" />
+            </label>
 
             {test && (
                 <div className={`alert ${test.online ? 'info' : 'danger'}`}>

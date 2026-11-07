@@ -217,6 +217,10 @@ export interface GameServer {
     channelId: string | null;
     messageId: string | null;
     createdAt: number;
+    publicAddress: string | null;
+    opensAt: number | null;
+    inviteUrl: string | null;
+    infoText: string | null;
     status: ServerStatus | null;
     rcon: { port: number | null; hasPassword: boolean };
 }
