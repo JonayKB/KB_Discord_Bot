@@ -376,7 +376,7 @@ const MIGRATIONS: string[] = [
     /* v9: información pública del servidor en su mensaje de Discord */ `
     ALTER TABLE game_servers ADD COLUMN public_address TEXT;  -- IP/dominio que se enseña a los jugadores
     ALTER TABLE game_servers ADD COLUMN opens_at INTEGER;     -- fecha de apertura (ms epoch)
-    ALTER TABLE game_servers ADD COLUMN invite_url TEXT;      -- enlace de invitación (botón del mensaje)
+    ALTER TABLE game_servers ADD COLUMN invite_url TEXT;      -- enlace de invitación (bloque copiable del mensaje)
     ALTER TABLE game_servers ADD COLUMN info_text TEXT;       -- texto libre al principio del mensaje
     `,
 ];

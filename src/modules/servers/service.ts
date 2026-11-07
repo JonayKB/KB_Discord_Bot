@@ -1,4 +1,4 @@
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, type Client, type Guild } from 'discord.js';
+import { EmbedBuilder, type Client, type Guild } from 'discord.js';
 import type { DB } from '../../core/db';
 import { getSetting, setSetting } from '../../core/db';
 import { publish } from '../../core/bus';
@@ -53,7 +53,7 @@ export interface GameServer {
     publicAddress: string | null;
     /** Fecha de apertura (ms epoch): mientras no llegue, el mensaje muestra la cuenta atrás. */
     opensAt: number | null;
-    /** Enlace de invitación: se muestra como botón debajo del mensaje. */
+    /** Enlace de invitación al servidor de Discord, en un bloque para copiarlo y pasárselo a amigos. */
     inviteUrl: string | null;
     /** Texto libre al principio del mensaje. */
     infoText: string | null;
@@ -404,20 +404,13 @@ export class ServersService {
         if (server.infoText) parts.push(server.infoText);
         const lines: string[] = [];
         if (server.publicAddress) lines.push(`🌐 **IP**\n\`\`\`\n${server.publicAddress}\n\`\`\``);
+        if (server.inviteUrl) lines.push(`🔗 **Invita a tus amigos**\n\`\`\`\n${server.inviteUrl}\n\`\`\``);
         if (server.opensAt && server.opensAt > now) {
             const t = Math.floor(server.opensAt / 1000);
             lines.push(`📅 **Apertura:** <t:${t}:D>\n🕒 **Hora:** <t:${t}:t>\n⏳ **Empieza** <t:${t}:R>`);
         }
         if (lines.length) parts.push(lines.join('\n'));
         return parts.join('\n\n');
-    }
-
-    /** Botones del mensaje (de momento, el enlace de invitación). */
-    buildComponents(server: GameServer): ActionRowBuilder<ButtonBuilder>[] {
-        if (!server.inviteUrl) return [];
-        return [new ActionRowBuilder<ButtonBuilder>().addComponents(
-            new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Invitación a Discord').setEmoji('🔗').setURL(server.inviteUrl),
-        )];
     }
 
     buildEmbed(server: GameServer, s: ServerStatus | null): EmbedBuilder {
@@ -494,7 +487,7 @@ export class ServersService {
 
     private async editMessage(server: GameServer, s: ServerStatus | null): Promise<void> {
         const message = await this.fetchStatusMessage(server);
-        await message.edit({ embeds: [this.buildEmbed(server, s)], components: this.buildComponents(server) });
+        await message.edit({ embeds: [this.buildEmbed(server, s)], components: [] }); // [] quita el botón de versiones anteriores
     }
 
     /** Publica un mensaje de estado nuevo en un canal y lo deja enlazado al servidor. */
@@ -503,7 +496,7 @@ export class ServersService {
         const channel = await this.client.channels.fetch(channelId).catch(() => null);
         if (!channel || !('send' in channel)) throw new HttpError(400, 'Ese canal no admite mensajes.');
         const sent = await (channel as { send: (o: unknown) => Promise<{ id: string }> })
-            .send({ embeds: [this.buildEmbed(server, this.statuses.get(id) ?? null)], components: this.buildComponents(server) })
+            .send({ embeds: [this.buildEmbed(server, this.statuses.get(id) ?? null)] })
             .catch(err => { throw new HttpError(400, `No se pudo publicar en el canal: ${(err as Error).message}`); });
         this.db.prepare('UPDATE game_servers SET channel_id = ?, message_id = ? WHERE id = ?').run(channelId, sent.id, id);
         const updated = this.require(id);

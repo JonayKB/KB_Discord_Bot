@@ -435,14 +435,15 @@ async function main() {
     assert.ok(infoEmbed.description.startsWith('¡Nueva temporada!'));
     assert.ok(infoEmbed.description.includes('```\nminecraft.jonaykb.com\n```'));
     assert.ok(infoEmbed.description.includes(`<t:${Math.floor(opensAt / 1000)}:R>`));
-    assert.equal(infoMsg.components?.[0]?.components?.[0]?.data?.url, 'https://discord.gg/2V4GSxzEgZ', 'botón con el enlace');
+    assert.ok(infoEmbed.description.includes('```\nhttps://discord.gg/2V4GSxzEgZ\n```'), 'invitación copiable');
+    assert.deepEqual(infoMsg.components, [], 'sin botones (y quita los de versiones anteriores)');
     await call('PUT', `/api/servers/${down.json.id}`, { ...withInfo.json, opensAt: Date.now() - 1000 });
     const editsOpen = counterEdits.length;
     await call('POST', `/api/servers/${down.json.id}/check`);
     const openEmbed = (counterEdits.slice(editsOpen).find((o: any) => /Caído/.test(o.embeds?.[0]?.data?.title ?? '')) as any).embeds[0].data;
     assert.match(openEmbed.title, /Offline/, 'pasada la apertura vuelve a ser Offline');
     assert.ok(!openEmbed.description.includes('<t:'), 'y ya no muestra la cuenta atrás');
-    ok('información del servidor: texto, IP, apertura con cuenta atrás y botón de invitación');
+    ok('información del servidor: texto, IP, apertura con cuenta atrás e invitación copiable');
 
     assert.equal((await call('POST', `/api/servers/${down.json.id}/message/unlink`)).json.messageId, null);
     assert.equal((await call('DELETE', `/api/servers/${down.json.id}`)).status, 200);
