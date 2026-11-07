@@ -1,4 +1,4 @@
-import { EmbedBuilder, type Client, type Guild } from 'discord.js';
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, type Client, type Guild } from 'discord.js';
 import type { DB } from '../../core/db';
 import { getSetting, setSetting } from '../../core/db';
 import { publish } from '../../core/bus';
@@ -31,6 +31,10 @@ interface GameServerRow {
     channel_id: string | null;
     message_id: string | null;
     created_at: number;
+    public_address: string | null;
+    opens_at: number | null;
+    invite_url: string | null;
+    info_text: string | null;
 }
 
 export interface GameServer {
@@ -45,9 +49,18 @@ export interface GameServer {
     channelId: string | null;
     messageId: string | null;
     createdAt: number;
+    /** IP o dominio que se enseña a los jugadores en el mensaje (vacío = no se muestra). */
+    publicAddress: string | null;
+    /** Fecha de apertura (ms epoch): mientras no llegue, el mensaje muestra la cuenta atrás. */
+    opensAt: number | null;
+    /** Enlace de invitación: se muestra como botón debajo del mensaje. */
+    inviteUrl: string | null;
+    /** Texto libre al principio del mensaje. */
+    infoText: string | null;
 }
 
-export type GameServerInput = Pick<GameServer, 'name' | 'type' | 'host' | 'port' | 'apiPort' | 'enabled' | 'linkPlayers'>;
+export type GameServerInput = Pick<GameServer, 'name' | 'type' | 'host' | 'port' | 'apiPort' | 'enabled' | 'linkPlayers'
+    | 'publicAddress' | 'opensAt' | 'inviteUrl' | 'infoText'>;
 
 export interface LinkedPlayer extends PlayerInfo {
     /** Usuario de Discord asociado (por la respuesta que dio en una campaña de confirmación). */
@@ -107,6 +120,10 @@ const toServer = (r: GameServerRow): GameServer => ({
     channelId: r.channel_id,
     messageId: r.message_id,
     createdAt: r.created_at,
+    publicAddress: r.public_address,
+    opensAt: r.opens_at,
+    inviteUrl: r.invite_url,
+    infoText: r.info_text,
 });
 
 const TYPE_LABEL: Record<ServerKind, string> = { minecraft: 'Minecraft', hytale: 'Hytale' };
@@ -172,8 +189,8 @@ export class ServersService {
 
     create(input: GameServerInput): GameServer {
         const res = this.db.prepare(`
-            INSERT INTO game_servers (name, type, host, port, api_port, enabled, link_players, created_at)
-            VALUES (@name, @type, @host, @port, @apiPort, @enabled, @linkPlayers, @createdAt)
+            INSERT INTO game_servers (name, type, host, port, api_port, enabled, link_players, public_address, opens_at, invite_url, info_text, created_at)
+            VALUES (@name, @type, @host, @port, @apiPort, @enabled, @linkPlayers, @publicAddress, @opensAt, @inviteUrl, @infoText, @createdAt)
         `).run({ ...this.params(input), createdAt: Date.now() });
         const s = this.require(Number(res.lastInsertRowid));
         publish('servers:changed', { id: s.id });
@@ -185,13 +202,16 @@ export class ServersService {
         this.require(id);
         this.db.prepare(`
             UPDATE game_servers SET name=@name, type=@type, host=@host, port=@port, api_port=@apiPort,
-                enabled=@enabled, link_players=@linkPlayers
+                enabled=@enabled, link_players=@linkPlayers, public_address=@publicAddress, opens_at=@opensAt,
+                invite_url=@inviteUrl, info_text=@infoText
             WHERE id=@id
         `).run({ ...this.params(input), id });
         const s = this.require(id);
         if (!s.enabled) this.statuses.delete(id);
         publish('servers:changed', { id });
         if (this.active && s.enabled) void this.check(id);
+        // Pausado no se consulta, pero el mensaje debe reflejar la información nueva.
+        else if (s.channelId && s.messageId) void this.editMessage(s, this.statuses.get(id) ?? null).catch(() => undefined);
         return s;
     }
 
@@ -211,6 +231,10 @@ export class ServersService {
             apiPort: i.apiPort,
             enabled: i.enabled ? 1 : 0,
             linkPlayers: i.linkPlayers ? 1 : 0,
+            publicAddress: i.publicAddress || null,
+            opensAt: i.opensAt,
+            inviteUrl: i.inviteUrl || null,
+            infoText: i.infoText || null,
         };
     }
 
@@ -374,19 +398,45 @@ export class ServersService {
 
     // ────────────────────────── Mensaje de estado en Discord ──────────────────────────
 
+    /** Bloque con la información pública (texto, IP y apertura) que encabeza el mensaje. */
+    private infoBlock(server: GameServer, now = Date.now()): string {
+        const parts: string[] = [];
+        if (server.infoText) parts.push(server.infoText);
+        const lines: string[] = [];
+        if (server.publicAddress) lines.push(`🌐 **IP**\n\`\`\`\n${server.publicAddress}\n\`\`\``);
+        if (server.opensAt && server.opensAt > now) {
+            const t = Math.floor(server.opensAt / 1000);
+            lines.push(`📅 **Apertura:** <t:${t}:D>\n🕒 **Hora:** <t:${t}:t>\n⏳ **Empieza** <t:${t}:R>`);
+        }
+        if (lines.length) parts.push(lines.join('\n'));
+        return parts.join('\n\n');
+    }
+
+    /** Botones del mensaje (de momento, el enlace de invitación). */
+    buildComponents(server: GameServer): ActionRowBuilder<ButtonBuilder>[] {
+        if (!server.inviteUrl) return [];
+        return [new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Invitación a Discord').setEmoji('🔗').setURL(server.inviteUrl),
+        )];
+    }
+
     buildEmbed(server: GameServer, s: ServerStatus | null): EmbedBuilder {
         const interval = this.intervalSec();
         const footer = { text: `${TYPE_LABEL[server.type]} · se actualiza cada ${interval < 60 ? `${interval} s` : `${Math.round(interval / 60)} min`}` };
+        const info = this.infoBlock(server);
+        const withInfo = (text: string) => (info ? `${info}\n\n${text}` : text).slice(0, 4096);
+        const upcoming = !!server.opensAt && server.opensAt > Date.now();
 
         if (!s) {
-            return new EmbedBuilder().setColor(0x5865f2).setTitle(`📊 ${server.name}`).setDescription('**Consultando el servidor…**').setFooter(footer).setTimestamp();
+            return new EmbedBuilder().setColor(0x5865f2).setTitle(`📊 ${server.name}`).setDescription(withInfo('**Consultando el servidor…**')).setFooter(footer).setTimestamp();
         }
 
         if (!s.online) {
+            // Antes de abrir, que esté apagado es lo normal: se muestra la cuenta atrás en vez de "Offline".
             return new EmbedBuilder()
-                .setColor(0xff0000)
-                .setTitle(`🔴 ${server.name} · Offline`)
-                .setDescription('El servidor no responde ahora mismo. Vuelve a mirar en un rato.')
+                .setColor(upcoming ? 0xfee75c : 0xff0000)
+                .setTitle(upcoming ? `⏳ ${server.name} · Próximamente` : `🔴 ${server.name} · Offline`)
+                .setDescription(upcoming ? info : withInfo('El servidor no responde ahora mismo. Vuelve a mirar en un rato.'))
                 .setFooter(footer)
                 .setTimestamp();
         }
@@ -397,9 +447,9 @@ export class ServersService {
             .setFooter(footer)
             .setTimestamp();
 
-        const info = [`🟢 **Online**${s.latencyMs !== null ? ` · ${s.latencyMs} ms` : ''}`];
-        if (s.version) info.push(`🏷️ ${s.version}`);
-        embed.setDescription(info.join('\n'));
+        const status = [`🟢 **Online**${s.latencyMs !== null ? ` · ${s.latencyMs} ms` : ''}`];
+        if (s.version) status.push(`🏷️ ${s.version}`);
+        embed.setDescription(withInfo(status.join('\n')));
 
         if (s.tps) {
             embed.addFields({
@@ -442,9 +492,9 @@ export class ServersService {
         return message;
     }
 
-    private async editMessage(server: GameServer, s: ServerStatus): Promise<void> {
+    private async editMessage(server: GameServer, s: ServerStatus | null): Promise<void> {
         const message = await this.fetchStatusMessage(server);
-        await message.edit({ embeds: [this.buildEmbed(server, s)] });
+        await message.edit({ embeds: [this.buildEmbed(server, s)], components: this.buildComponents(server) });
     }
 
     /** Publica un mensaje de estado nuevo en un canal y lo deja enlazado al servidor. */
@@ -453,7 +503,7 @@ export class ServersService {
         const channel = await this.client.channels.fetch(channelId).catch(() => null);
         if (!channel || !('send' in channel)) throw new HttpError(400, 'Ese canal no admite mensajes.');
         const sent = await (channel as { send: (o: unknown) => Promise<{ id: string }> })
-            .send({ embeds: [this.buildEmbed(server, this.statuses.get(id) ?? null)] })
+            .send({ embeds: [this.buildEmbed(server, this.statuses.get(id) ?? null)], components: this.buildComponents(server) })
             .catch(err => { throw new HttpError(400, `No se pudo publicar en el canal: ${(err as Error).message}`); });
         this.db.prepare('UPDATE game_servers SET channel_id = ?, message_id = ? WHERE id = ?').run(channelId, sent.id, id);
         const updated = this.require(id);

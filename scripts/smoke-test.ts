@@ -418,6 +418,32 @@ async function main() {
     const ch0 = channelsSent.length;
     assert.equal((await call('POST', `/api/servers/${down.json.id}/message`, { channelId: 'C1' })).json.channelId, 'C1');
     assert.equal(channelsSent.length, ch0 + 1);
+
+    // Información pública: IP, apertura y enlace de invitación en el mismo mensaje.
+    const opensAt = Date.now() + 30 * 86_400_000;
+    assert.equal((await call('PUT', `/api/servers/${down.json.id}`, { ...down.json, inviteUrl: 'ftp://x' })).status, 400, 'enlace que no es http(s)');
+    const withInfo = await call('PUT', `/api/servers/${down.json.id}`, {
+        ...down.json, publicAddress: 'minecraft.jonaykb.com', opensAt, inviteUrl: 'discord.gg/2V4GSxzEgZ', infoText: '¡Nueva temporada!',
+    });
+    assert.equal(withInfo.json.inviteUrl, 'https://discord.gg/2V4GSxzEgZ', 'añade https:// al enlace');
+    const editsInfo = counterEdits.length;
+    await call('POST', `/api/servers/${down.json.id}/check`);
+    const infoMsg = counterEdits.slice(editsInfo).find((o: any) => /Caído/.test(o.embeds?.[0]?.data?.title ?? '')) as any;
+    assert.ok(infoMsg, 'se edita el mensaje con la información');
+    const infoEmbed = infoMsg.embeds[0].data;
+    assert.match(infoEmbed.title, /Próximamente/, 'antes de abrir, apagado no sale como Offline');
+    assert.ok(infoEmbed.description.startsWith('¡Nueva temporada!'));
+    assert.ok(infoEmbed.description.includes('```\nminecraft.jonaykb.com\n```'));
+    assert.ok(infoEmbed.description.includes(`<t:${Math.floor(opensAt / 1000)}:R>`));
+    assert.equal(infoMsg.components?.[0]?.components?.[0]?.data?.url, 'https://discord.gg/2V4GSxzEgZ', 'botón con el enlace');
+    await call('PUT', `/api/servers/${down.json.id}`, { ...withInfo.json, opensAt: Date.now() - 1000 });
+    const editsOpen = counterEdits.length;
+    await call('POST', `/api/servers/${down.json.id}/check`);
+    const openEmbed = (counterEdits.slice(editsOpen).find((o: any) => /Caído/.test(o.embeds?.[0]?.data?.title ?? '')) as any).embeds[0].data;
+    assert.match(openEmbed.title, /Offline/, 'pasada la apertura vuelve a ser Offline');
+    assert.ok(!openEmbed.description.includes('<t:'), 'y ya no muestra la cuenta atrás');
+    ok('información del servidor: texto, IP, apertura con cuenta atrás y botón de invitación');
+
     assert.equal((await call('POST', `/api/servers/${down.json.id}/message/unlink`)).json.messageId, null);
     assert.equal((await call('DELETE', `/api/servers/${down.json.id}`)).status, 200);
     ok('frecuencia, publicar / soltar mensaje de estado y eliminar');
