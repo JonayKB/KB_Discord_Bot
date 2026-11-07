@@ -423,11 +423,11 @@ function ServerEditor({ initial, onClose, onSaved }: { initial: GameServer | nul
                 <label className="field">Fecha y hora de apertura
                     <input type="datetime-local" value={d.opensAt} onChange={e => set({ opensAt: e.target.value })} />
                 </label>
-                <label className="field">Enlace de invitación
+                <label className="field">Invitación a este Discord
                     <input type="text" maxLength={300} value={d.inviteUrl} onChange={e => set({ inviteUrl: e.target.value })} placeholder="https://discord.gg/…" spellCheck={false} />
                 </label>
             </div>
-            <span className="hint" style={{ marginTop: -6 }}>Hasta la apertura se muestra la fecha, la hora y la cuenta atrás (cada uno la ve en su zona horaria) y, si el servidor está apagado, aparece como «Próximamente» en vez de «Offline». El enlace sale como botón debajo del mensaje.</span>
+            <span className="hint" style={{ marginTop: -6 }}>Hasta la apertura se muestra la fecha, la hora y la cuenta atrás (cada uno la ve en su zona horaria) y, si el servidor está apagado, aparece como «Próximamente» en vez de «Offline». La IP y la invitación salen en bloques que se copian con un toque para pasárselos a amigos.</span>
             <label className="field">Texto adicional
                 <textarea rows={3} maxLength={1000} value={d.infoText} onChange={e => set({ infoText: e.target.value })} placeholder="Normas, modpack, cómo entrar… (admite formato de Discord: **negrita**, enlaces…)" />
             </label>
