@@ -259,6 +259,7 @@ export function createServersModule(service: ServersService, whitelist: Whitelis
             stats.start();
             ctx.listen('guildMemberRemove', m => whitelist.onMemberLeave(m.id));
             ctx.listen('interactionCreate', i => stats.handleInteraction(i));
+            ctx.listen('interactionCreate', i => service.handleInteraction(i));
             ctx.onStop(() => { service.stop(); whitelist.stop(); stats.stop(); });
         },
     };

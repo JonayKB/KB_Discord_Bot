@@ -1,4 +1,4 @@
-import { EmbedBuilder, type Client, type Guild } from 'discord.js';
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags, type Client, type Guild, type Interaction } from 'discord.js';
 import type { DB } from '../../core/db';
 import { getSetting, setSetting } from '../../core/db';
 import { publish } from '../../core/bus';
@@ -6,7 +6,8 @@ import { env } from '../../core/config';
 import { HttpError } from '../../core/http';
 import { Logger } from '../../utils/Logger';
 import type { ConfirmationService } from '../confirmations/service';
-import { queryServer, type PlayerInfo, type QueryResult, type ServerKind } from './query';
+import { queryServer, resolveMinecraftAddress, type PlayerInfo, type QueryResult, type ServerKind } from './query';
+import { countryFlag, latencyDot, LatencyChecker, splitAddress } from './latency';
 
 const logger = new Logger('ServersService');
 
@@ -156,6 +157,7 @@ function fitLines(lines: string[], limit = 1000): string {
 
 export class ServersService {
     private readonly statuses = new Map<number, ServerStatus>();
+    private readonly latency = new LatencyChecker();
     private timer: NodeJS.Timeout | undefined;
     private polling = false;
     active = false;
@@ -440,9 +442,8 @@ export class ServersService {
             .setFooter(footer)
             .setTimestamp();
 
-        const status = [`🟢 **Online**${s.latencyMs !== null ? ` · ${s.latencyMs} ms` : ''}`];
-        if (s.version) status.push(`🏷️ ${s.version}`);
-        embed.setDescription(withInfo(status.join('\n')));
+        // Ni latencia (el bot está junto al servidor, no es representativa: está el botón) ni versión.
+        embed.setDescription(withInfo('🟢 **Online**'));
 
         if (s.tps) {
             embed.addFields({
@@ -477,6 +478,43 @@ export class ServersService {
         return embed;
     }
 
+    /** Botón para ver la latencia desde varios países (solo si hay una IP pública que medir). */
+    buildComponents(server: GameServer): ActionRowBuilder<ButtonBuilder>[] {
+        if (!server.publicAddress) return [];
+        return [new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder().setCustomId(`srvping:${server.id}`).setLabel('Ping desde el mundo').setEmoji('📡').setStyle(ButtonStyle.Secondary),
+        )];
+    }
+
+    async handleInteraction(i: Interaction): Promise<void> {
+        if (!i.isButton()) return;
+        const m = /^srvping:(\d+)$/.exec(i.customId);
+        if (!m) return;
+        const server = this.list().find(x => x.id === Number(m[1]));
+        if (!server?.publicAddress) {
+            await i.reply({ content: 'Este servidor ya no tiene una IP pública configurada.', flags: MessageFlags.Ephemeral });
+            return;
+        }
+        await i.deferReply({ flags: MessageFlags.Ephemeral });
+        try {
+            const addr = splitAddress(server.publicAddress);
+            const target = server.type === 'minecraft'
+                ? await resolveMinecraftAddress(addr.host, addr.port)
+                : { host: addr.host, port: addr.port ?? server.port ?? 5520 };
+            const report = await this.latency.check(server.type, target.host, target.port);
+            const rows = [...report.results].sort((a, b) => (a.avgMs ?? Infinity) - (b.avgMs ?? Infinity));
+            const lines = rows.map(r => `${latencyDot(r.avgMs)} ${countryFlag(r.country)} **${r.city}** · ${r.avgMs === null ? '*sin respuesta*' : `${Math.round(r.avgMs)} ms`}`);
+            const embed = new EmbedBuilder()
+                .setColor(0x00aaff)
+                .setTitle(`📡 Ping a ${server.name}`)
+                .setDescription(`${lines.join('\n') || '*No hay sondas disponibles ahora mismo.*'}\n\n-# Medido <t:${Math.floor(report.measuredAt / 1000)}:R> con [Globalping](https://globalping.io). Tu ping real depende de tu conexión.`);
+            await i.editReply({ embeds: [embed] });
+        } catch (err) {
+            logger.warn(`No se pudo medir la latencia de ${server.name}: ${(err as Error).message}`);
+            await i.editReply({ content: `No se pudo medir la latencia: ${(err as Error).message}` }).catch(() => undefined);
+        }
+    }
+
     private async fetchStatusMessage(server: GameServer) {
         const channel = await this.client.channels.fetch(server.channelId!).catch(() => null);
         if (!channel || !('messages' in channel)) throw new Error('el canal ya no existe o no es de texto');
@@ -487,7 +525,7 @@ export class ServersService {
 
     private async editMessage(server: GameServer, s: ServerStatus | null): Promise<void> {
         const message = await this.fetchStatusMessage(server);
-        await message.edit({ embeds: [this.buildEmbed(server, s)], components: [] }); // [] quita el botón de versiones anteriores
+        await message.edit({ embeds: [this.buildEmbed(server, s)], components: this.buildComponents(server) });
     }
 
     /** Publica un mensaje de estado nuevo en un canal y lo deja enlazado al servidor. */
@@ -496,7 +534,7 @@ export class ServersService {
         const channel = await this.client.channels.fetch(channelId).catch(() => null);
         if (!channel || !('send' in channel)) throw new HttpError(400, 'Ese canal no admite mensajes.');
         const sent = await (channel as { send: (o: unknown) => Promise<{ id: string }> })
-            .send({ embeds: [this.buildEmbed(server, this.statuses.get(id) ?? null)] })
+            .send({ embeds: [this.buildEmbed(server, this.statuses.get(id) ?? null)], components: this.buildComponents(server) })
             .catch(err => { throw new HttpError(400, `No se pudo publicar en el canal: ${(err as Error).message}`); });
         this.db.prepare('UPDATE game_servers SET channel_id = ?, message_id = ? WHERE id = ?').run(channelId, sent.id, id);
         const updated = this.require(id);
