@@ -206,7 +206,7 @@ function pingStatus(host: string, port: number, timeout: number): Promise<{ data
 }
 
 /** Como el cliente de Minecraft: si no se indica puerto, se mira el registro SRV _minecraft._tcp del dominio. */
-async function resolveMinecraftAddress(host: string, port: number | null): Promise<{ host: string; port: number }> {
+export async function resolveMinecraftAddress(host: string, port: number | null): Promise<{ host: string; port: number }> {
     if (port !== null || net.isIP(host)) return { host, port: port ?? 25565 };
     try {
         const [srv] = await dns.resolveSrv(`_minecraft._tcp.${host}`);

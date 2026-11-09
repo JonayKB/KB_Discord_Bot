@@ -436,7 +436,8 @@ async function main() {
     assert.ok(infoEmbed.description.includes('```\nminecraft.jonaykb.com\n```'));
     assert.ok(infoEmbed.description.includes(`<t:${Math.floor(opensAt / 1000)}:R>`));
     assert.ok(infoEmbed.description.includes('```\nhttps://discord.gg/2V4GSxzEgZ\n```'), 'invitación copiable');
-    assert.deepEqual(infoMsg.components, [], 'sin botones (y quita los de versiones anteriores)');
+    const buttons = infoMsg.components.flatMap((row: any) => row.toJSON().components);
+    assert.deepEqual(buttons.map((b: any) => b.custom_id), [`srvping:${down.json.id}`], 'solo el botón de ping desde el mundo (y quita los de versiones anteriores)');
     await call('PUT', `/api/servers/${down.json.id}`, { ...withInfo.json, opensAt: Date.now() - 1000 });
     const editsOpen = counterEdits.length;
     await call('POST', `/api/servers/${down.json.id}/check`);
