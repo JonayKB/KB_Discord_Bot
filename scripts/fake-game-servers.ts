@@ -61,7 +61,9 @@ export function startFakeMinecraft(port: number, state: FakeMcState): net.Server
                         description: { text: state.motd },
                     });
                     const s = Buffer.from(json, 'utf8');
-                    sock.write(packet(0, Buffer.concat([varInt(s.length), s])));
+                    // Algunos mods (Forge/NeoForge) añaden datos extra tras el JSON dentro del mismo paquete: lo imitamos.
+                    const extra = Buffer.from('{"name":"PLEASE_CHANGE_ME","version":"CHANGE_ME"}', 'utf8');
+                    sock.write(packet(0, Buffer.concat([varInt(s.length), s, varInt(extra.length), extra])));
                 } else if (id[0] === 1) {
                     // Ping → Pong con el mismo payload
                     sock.write(packet(1, body.subarray(id[1])));
