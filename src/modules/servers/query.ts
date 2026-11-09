@@ -1,5 +1,8 @@
+import dns from 'node:dns/promises';
 import https from 'node:https';
-import { queryFull, status } from 'minecraft-server-util';
+import net from 'node:net';
+import { queryFull } from 'minecraft-server-util';
+import { clean as cleanMotd, parse as parseMotd } from 'minecraft-motd-util';
 
 export type ServerKind = 'minecraft' | 'hytale';
 
@@ -81,16 +84,157 @@ async function fetchSpark(host: string, apiPort: number): Promise<SparkMetrics> 
     return d;
 }
 
+// Cliente propio de Server List Ping (https://wiki.vg/Server_List_Ping). El de minecraft-server-util no respeta la
+// longitud del paquete: si un mod (p. ej. en Forge/NeoForge) añade datos tras el JSON, los lee como si fueran el
+// "pong" y falla ("Expected server to send packet type 0x01..."). Aquí se salta lo que sobre y el pong es opcional:
+// solo sirve para medir la latencia.
+
+interface SlpStatus {
+    version?: { name?: string };
+    players?: { online?: number; max?: number; sample?: Array<{ name: string; id: string }> | null };
+    description?: unknown;
+}
+
+/** Tras recibir el estado, cuánto esperamos al pong antes de quedarnos con la latencia de la respuesta de estado. */
+const PONG_TIMEOUT = 1500;
+
+function writeVarInt(n: number): Buffer {
+    const out: number[] = [];
+    do {
+        let b = n & 0x7f;
+        n >>>= 7;
+        if (n) b |= 0x80;
+        out.push(b);
+    } while (n);
+    return Buffer.from(out);
+}
+
+/** Lee un VarInt; null si aún no han llegado bytes suficientes. */
+function readVarInt(buf: Buffer, off: number): { value: number; next: number } | null {
+    let v = 0;
+    for (let i = 0; i < 5; i++) {
+        if (off + i >= buf.length) return null;
+        const b = buf[off + i];
+        v |= (b & 0x7f) << (7 * i);
+        if (!(b & 0x80)) return { value: v, next: off + i + 1 };
+    }
+    throw new Error('Respuesta no válida (VarInt demasiado largo)');
+}
+
+function mcPacket(id: number, payload: Buffer): Buffer {
+    const body = Buffer.concat([writeVarInt(id), payload]);
+    return Buffer.concat([writeVarInt(body.length), body]);
+}
+
+/** Extrae el siguiente paquete completo del búfer, o null si está incompleto. */
+function takePacket(buf: Buffer): { id: number; body: Buffer; rest: Buffer } | null {
+    const len = readVarInt(buf, 0);
+    if (!len || buf.length < len.next + len.value) return null;
+    const pkt = buf.subarray(len.next, len.next + len.value);
+    const id = readVarInt(pkt, 0);
+    if (!id) throw new Error('Respuesta no válida (paquete vacío)');
+    return { id: id.value, body: pkt.subarray(id.next), rest: buf.subarray(len.next + len.value) };
+}
+
+function pingStatus(host: string, port: number, timeout: number): Promise<{ data: SlpStatus; latencyMs: number }> {
+    return new Promise((resolve, reject) => {
+        const sock = net.connect({ host, port });
+        let buf: Buffer = Buffer.alloc(0);
+        let data: SlpStatus | null = null;
+        let statusLatency = 0;
+        let requestAt = 0;
+        let pingAt = 0;
+        let pongTimer: NodeJS.Timeout | undefined;
+        let done = false;
+
+        const finish = (err: Error | null, latencyMs = 0) => {
+            if (done) return;
+            done = true;
+            clearTimeout(timer);
+            clearTimeout(pongTimer);
+            sock.destroy();
+            if (err) reject(err);
+            else resolve({ data: data!, latencyMs });
+        };
+        // Sin pong válido nos quedamos con el tiempo que tardó la respuesta de estado.
+        const finishWithoutPong = () => finish(null, statusLatency);
+
+        const timer = setTimeout(() => {
+            if (data) finishWithoutPong();
+            else finish(Object.assign(new Error('timeout'), { name: 'TimeoutError' }));
+        }, timeout);
+
+        sock.on('connect', () => {
+            const hostBuf = Buffer.from(host, 'utf8');
+            const portBuf = Buffer.alloc(2);
+            portBuf.writeUInt16BE(port);
+            sock.write(mcPacket(0x00, Buffer.concat([writeVarInt(47), writeVarInt(hostBuf.length), hostBuf, portBuf, writeVarInt(1)])));
+            requestAt = Date.now();
+            sock.write(mcPacket(0x00, Buffer.alloc(0)));
+        });
+        sock.on('error', err => (data ? finishWithoutPong() : finish(err)));
+        sock.on('close', () => (data ? finishWithoutPong() : finish(new Error('El servidor cerró la conexión sin responder'))));
+        sock.on('data', chunk => {
+            buf = Buffer.concat([buf, chunk]);
+            try {
+                const pkt = takePacket(buf);
+                if (!pkt) return;
+                buf = pkt.rest;
+                if (!data) {
+                    if (pkt.id !== 0x00) throw new Error(`Respuesta no válida (paquete ${pkt.id} en vez del estado)`);
+                    const str = readVarInt(pkt.body, 0);
+                    if (!str || str.next + str.value > pkt.body.length) throw new Error('Respuesta no válida (estado incompleto)');
+                    // Lo que haya tras el JSON (datos extra de mods) se ignora.
+                    data = JSON.parse(pkt.body.subarray(str.next, str.next + str.value).toString('utf8')) as SlpStatus;
+                    statusLatency = Date.now() - requestAt;
+                    const payload = Buffer.alloc(8);
+                    payload.writeBigInt64BE(BigInt(Date.now()));
+                    pingAt = Date.now();
+                    sock.write(mcPacket(0x01, payload));
+                    pongTimer = setTimeout(finishWithoutPong, PONG_TIMEOUT);
+                } else if (pkt.id === 0x01) {
+                    finish(null, Date.now() - pingAt);
+                } else {
+                    finishWithoutPong();
+                }
+            } catch (err) {
+                if (data) finishWithoutPong();
+                else finish(err instanceof Error ? err : new Error(String(err)));
+            }
+        });
+    });
+}
+
+/** Como el cliente de Minecraft: si no se indica puerto, se mira el registro SRV _minecraft._tcp del dominio. */
+async function resolveMinecraftAddress(host: string, port: number | null): Promise<{ host: string; port: number }> {
+    if (port !== null || net.isIP(host)) return { host, port: port ?? 25565 };
+    try {
+        const [srv] = await dns.resolveSrv(`_minecraft._tcp.${host}`);
+        if (srv) return { host: srv.name, port: srv.port };
+    } catch { /* sin registro SRV */ }
+    return { host, port: 25565 };
+}
+
+function motdText(description: unknown): string | null {
+    if (description == null) return null;
+    try {
+        return cleanMotd(parseMotd(description as Parameters<typeof parseMotd>[0])).trim() || null;
+    } catch {
+        return typeof description === 'string' ? description.trim() || null : null;
+    }
+}
+
 async function queryMinecraft(t: QueryTarget): Promise<QueryResult> {
-    const port = t.port ?? 25565;
+    const { host, port } = await resolveMinecraftAddress(t.host, t.port);
     // Las tres consultas van en paralelo, pero si el ping falla respondemos "offline" sin esperar a las otras.
     const settle = <T,>(p: Promise<T>) => p.then(value => ({ ok: true as const, value }), reason => ({ ok: false as const, reason }));
-    const qP = settle(queryFull(t.host, port, { timeout: QUERY_TIMEOUT }));
+    const qP = settle(queryFull(host, port, { timeout: QUERY_TIMEOUT }));
     const sparkP = settle(t.apiPort ? fetchSpark(t.host, t.apiPort) : Promise.reject(null));
 
-    let s: Awaited<ReturnType<typeof status>>;
+    let s: SlpStatus;
+    let latencyMs: number;
     try {
-        s = await status(t.host, port, { timeout: TIMEOUT });
+        ({ data: s, latencyMs } = await pingStatus(host, port, TIMEOUT));
     } catch (err) {
         return offline(friendlyNetError(err));
     }
@@ -104,8 +248,8 @@ async function queryMinecraft(t: QueryTarget): Promise<QueryResult> {
         players = q.value.players.list.map(name => ({ name }));
         complete = true;
     } else {
-        players = (s.players.sample ?? []).map(p => ({ name: p.name, id: p.id }));
-        complete = players.length >= s.players.online;
+        players = (s.players?.sample ?? []).map(p => ({ name: p.name, id: p.id }));
+        complete = players.length >= (s.players?.online ?? 0);
     }
 
     let tps: QueryResult['tps'] = null;
@@ -123,12 +267,12 @@ async function queryMinecraft(t: QueryTarget): Promise<QueryResult> {
     return {
         online: true,
         checkedAt: Date.now(),
-        latencyMs: s.roundTripLatency,
+        latencyMs,
         error: null,
-        version: s.version.name,
-        motd: s.motd.clean.trim() || null,
-        playersOnline: s.players.online,
-        maxPlayers: s.players.max,
+        version: s.version?.name ?? null,
+        motd: motdText(s.description),
+        playersOnline: s.players?.online ?? 0,
+        maxPlayers: s.players?.max ?? 0,
         players,
         playerListComplete: complete,
         tps, msptMs, cpu, warnings,
