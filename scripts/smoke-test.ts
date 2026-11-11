@@ -423,9 +423,10 @@ async function main() {
     const opensAt = Date.now() + 30 * 86_400_000;
     assert.equal((await call('PUT', `/api/servers/${down.json.id}`, { ...down.json, inviteUrl: 'ftp://x' })).status, 400, 'enlace que no es http(s)');
     const withInfo = await call('PUT', `/api/servers/${down.json.id}`, {
-        ...down.json, publicAddress: 'minecraft.jonaykb.com', opensAt, inviteUrl: 'discord.gg/2V4GSxzEgZ', infoText: '¡Nueva temporada!',
+        ...down.json, publicAddress: 'minecraft.jonaykb.com', opensAt, inviteUrl: 'discord.gg/2V4GSxzEgZ', infoText: '¡Nueva temporada!', mapUrl: 'minecraft.jonaykb.com',
     });
     assert.equal(withInfo.json.inviteUrl, 'https://discord.gg/2V4GSxzEgZ', 'añade https:// al enlace');
+    assert.equal(withInfo.json.mapUrl, 'https://minecraft.jonaykb.com/', 'añade https:// al mapa');
     const editsInfo = counterEdits.length;
     await call('POST', `/api/servers/${down.json.id}/check`);
     const infoMsg = counterEdits.slice(editsInfo).find((o: any) => /Caído/.test(o.embeds?.[0]?.data?.title ?? '')) as any;
@@ -437,7 +438,7 @@ async function main() {
     assert.ok(infoEmbed.description.includes(`<t:${Math.floor(opensAt / 1000)}:R>`));
     assert.ok(infoEmbed.description.includes('```\nhttps://discord.gg/2V4GSxzEgZ\n```'), 'invitación copiable');
     const buttons = infoMsg.components.flatMap((row: any) => row.toJSON().components);
-    assert.deepEqual(buttons.map((b: any) => b.custom_id), [`srvping:${down.json.id}`], 'solo el botón de ping desde el mundo (y quita los de versiones anteriores)');
+    assert.deepEqual(buttons.map((b: any) => b.url ?? b.custom_id), ['https://minecraft.jonaykb.com/', `srvping:${down.json.id}`], 'botón del mapa y de ping desde el mundo (y quita los de versiones anteriores)');
     await call('PUT', `/api/servers/${down.json.id}`, { ...withInfo.json, opensAt: Date.now() - 1000 });
     const editsOpen = counterEdits.length;
     await call('POST', `/api/servers/${down.json.id}/check`);

@@ -221,6 +221,7 @@ export interface GameServer {
     opensAt: number | null;
     inviteUrl: string | null;
     infoText: string | null;
+    mapUrl: string | null;
     status: ServerStatus | null;
     rcon: { port: number | null; hasPassword: boolean };
 }

@@ -328,7 +328,7 @@ function ServerStats({ server }: { server: GameServer }) {
 
 type Draft = {
     name: string; type: ServerKind; host: string; port: string; apiPort: string; enabled: boolean; linkPlayers: boolean;
-    publicAddress: string; opensAt: string; inviteUrl: string; infoText: string;
+    publicAddress: string; opensAt: string; inviteUrl: string; infoText: string; mapUrl: string;
 };
 
 /** ms epoch ↔ valor de <input type="datetime-local"> (hora local del navegador). */
@@ -344,9 +344,9 @@ function ServerEditor({ initial, onClose, onSaved }: { initial: GameServer | nul
         ? {
             name: initial.name, type: initial.type, host: initial.host, port: initial.port ? String(initial.port) : '', apiPort: initial.apiPort ? String(initial.apiPort) : '',
             enabled: initial.enabled, linkPlayers: initial.linkPlayers,
-            publicAddress: initial.publicAddress ?? '', opensAt: toLocalInput(initial.opensAt), inviteUrl: initial.inviteUrl ?? '', infoText: initial.infoText ?? '',
+            publicAddress: initial.publicAddress ?? '', opensAt: toLocalInput(initial.opensAt), inviteUrl: initial.inviteUrl ?? '', infoText: initial.infoText ?? '', mapUrl: initial.mapUrl ?? '',
         }
-        : { name: '', type: 'minecraft', host: '', port: '', apiPort: '', enabled: true, linkPlayers: true, publicAddress: '', opensAt: '', inviteUrl: '', infoText: '' });
+        : { name: '', type: 'minecraft', host: '', port: '', apiPort: '', enabled: true, linkPlayers: true, publicAddress: '', opensAt: '', inviteUrl: '', infoText: '', mapUrl: '' });
     const [saving, setSaving] = useState(false);
     const [testing, setTesting] = useState(false);
     const [test, setTest] = useState<ServerStatus | null>(null);
@@ -354,7 +354,7 @@ function ServerEditor({ initial, onClose, onSaved }: { initial: GameServer | nul
 
     const body = () => ({
         ...d, name: d.name.trim(), host: d.host.trim(), port: d.port.trim() || null, apiPort: d.apiPort.trim() || null,
-        publicAddress: d.publicAddress.trim(), opensAt: fromLocalInput(d.opensAt), inviteUrl: d.inviteUrl.trim(), infoText: d.infoText.trim(),
+        publicAddress: d.publicAddress.trim(), opensAt: fromLocalInput(d.opensAt), inviteUrl: d.inviteUrl.trim(), infoText: d.infoText.trim(), mapUrl: d.mapUrl.trim(),
     });
     const valid = () => {
         if (!d.host.trim()) { toast.error('Indica la IP o el dominio.'); return false; }
@@ -428,6 +428,10 @@ function ServerEditor({ initial, onClose, onSaved }: { initial: GameServer | nul
                 </label>
             </div>
             <span className="hint" style={{ marginTop: -6 }}>Hasta la apertura se muestra la fecha, la hora y la cuenta atrás (cada uno la ve en su zona horaria) y, si el servidor está apagado, aparece como «Próximamente» en vez de «Offline». La IP y la invitación salen en bloques que se copian con un toque para pasárselos a amigos.</span>
+            <label className="field">Mapa web
+                <input type="text" maxLength={300} value={d.mapUrl} onChange={e => set({ mapUrl: e.target.value })} placeholder="https://mapa.tudominio.com" spellCheck={false} />
+                <span className="hint">BlueMap, Dynmap, squaremap… Añade un botón «Ver mapa» al mensaje. Vacío = sin botón.</span>
+            </label>
             <label className="field">Texto adicional
                 <textarea rows={3} maxLength={1000} value={d.infoText} onChange={e => set({ infoText: e.target.value })} placeholder="Normas, modpack, cómo entrar… (admite formato de Discord: **negrita**, enlaces…)" />
             </label>
