@@ -379,6 +379,9 @@ const MIGRATIONS: string[] = [
     ALTER TABLE game_servers ADD COLUMN invite_url TEXT;      -- enlace de invitación (bloque copiable del mensaje)
     ALTER TABLE game_servers ADD COLUMN info_text TEXT;       -- texto libre al principio del mensaje
     `,
+    /* v10: enlace al mapa web del servidor (BlueMap, Dynmap…) */ `
+    ALTER TABLE game_servers ADD COLUMN map_url TEXT;
+    `,
 ];
 
 export function openDb(file = path.join(DATA_DIR, 'bot.db')): DB {

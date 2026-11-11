@@ -41,19 +41,20 @@ function parseServer(body: any): GameServerInput {
         linkPlayers: body.linkPlayers === undefined ? true : bool(body.linkPlayers),
         publicAddress: str(body.publicAddress, 'publicAddress', { max: 100 }).trim() || null,
         opensAt: body.opensAt === undefined || body.opensAt === null || body.opensAt === '' ? null : int(body.opensAt, 'opensAt', { min: 0 }),
-        inviteUrl: parseInviteUrl(body.inviteUrl),
+        inviteUrl: parseUrl(body.inviteUrl, 'inviteUrl', 'El enlace de invitación'),
+        mapUrl: parseUrl(body.mapUrl, 'mapUrl', 'El enlace del mapa'),
         infoText: str(body.infoText, 'infoText', { max: 1000 }).trim() || null,
     };
 }
 
-/** Acepta "discord.gg/abc" o una URL completa; tiene que acabar siendo http(s) para el botón de Discord. */
-function parseInviteUrl(v: unknown): string | null {
-    let raw = str(v, 'inviteUrl', { max: 300 }).trim();
+/** Acepta "discord.gg/abc" o "mapa.dominio.com" o una URL completa; tiene que acabar siendo http(s) (los botones de Discord lo exigen). */
+function parseUrl(v: unknown, field: string, label: string): string | null {
+    let raw = str(v, field, { max: 300 }).trim();
     if (!raw) return null;
     if (!/^[a-z]+:\/\//i.test(raw)) raw = `https://${raw}`;
     let url: URL;
-    try { url = new URL(raw); } catch { throw new HttpError(400, 'El enlace de invitación no es una URL válida'); }
-    if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new HttpError(400, 'El enlace de invitación debe empezar por https://');
+    try { url = new URL(raw); } catch { throw new HttpError(400, `${label} no es una URL válida`); }
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new HttpError(400, `${label} debe empezar por https://`);
     return url.toString();
 }
 

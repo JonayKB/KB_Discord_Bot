@@ -36,6 +36,7 @@ interface GameServerRow {
     opens_at: number | null;
     invite_url: string | null;
     info_text: string | null;
+    map_url: string | null;
 }
 
 export interface GameServer {
@@ -58,10 +59,12 @@ export interface GameServer {
     inviteUrl: string | null;
     /** Texto libre al principio del mensaje. */
     infoText: string | null;
+    /** Mapa web del servidor (BlueMap, Dynmap…): se enlaza con un botón en el mensaje. */
+    mapUrl: string | null;
 }
 
 export type GameServerInput = Pick<GameServer, 'name' | 'type' | 'host' | 'port' | 'apiPort' | 'enabled' | 'linkPlayers'
-    | 'publicAddress' | 'opensAt' | 'inviteUrl' | 'infoText'>;
+    | 'publicAddress' | 'opensAt' | 'inviteUrl' | 'infoText' | 'mapUrl'>;
 
 export interface LinkedPlayer extends PlayerInfo {
     /** Usuario de Discord asociado (por la respuesta que dio en una campaña de confirmación). */
@@ -125,6 +128,7 @@ const toServer = (r: GameServerRow): GameServer => ({
     opensAt: r.opens_at,
     inviteUrl: r.invite_url,
     infoText: r.info_text,
+    mapUrl: r.map_url,
 });
 
 const TYPE_LABEL: Record<ServerKind, string> = { minecraft: 'Minecraft', hytale: 'Hytale' };
@@ -191,8 +195,8 @@ export class ServersService {
 
     create(input: GameServerInput): GameServer {
         const res = this.db.prepare(`
-            INSERT INTO game_servers (name, type, host, port, api_port, enabled, link_players, public_address, opens_at, invite_url, info_text, created_at)
-            VALUES (@name, @type, @host, @port, @apiPort, @enabled, @linkPlayers, @publicAddress, @opensAt, @inviteUrl, @infoText, @createdAt)
+            INSERT INTO game_servers (name, type, host, port, api_port, enabled, link_players, public_address, opens_at, invite_url, info_text, map_url, created_at)
+            VALUES (@name, @type, @host, @port, @apiPort, @enabled, @linkPlayers, @publicAddress, @opensAt, @inviteUrl, @infoText, @mapUrl, @createdAt)
         `).run({ ...this.params(input), createdAt: Date.now() });
         const s = this.require(Number(res.lastInsertRowid));
         publish('servers:changed', { id: s.id });
@@ -205,7 +209,7 @@ export class ServersService {
         this.db.prepare(`
             UPDATE game_servers SET name=@name, type=@type, host=@host, port=@port, api_port=@apiPort,
                 enabled=@enabled, link_players=@linkPlayers, public_address=@publicAddress, opens_at=@opensAt,
-                invite_url=@inviteUrl, info_text=@infoText
+                invite_url=@inviteUrl, info_text=@infoText, map_url=@mapUrl
             WHERE id=@id
         `).run({ ...this.params(input), id });
         const s = this.require(id);
@@ -237,6 +241,7 @@ export class ServersService {
             opensAt: i.opensAt,
             inviteUrl: i.inviteUrl || null,
             infoText: i.infoText || null,
+            mapUrl: i.mapUrl || null,
         };
     }
 
@@ -478,12 +483,12 @@ export class ServersService {
         return embed;
     }
 
-    /** Botón para ver la latencia desde varios países (solo si hay una IP pública que medir). */
+    /** Botones del mensaje: enlace al mapa web y latencia desde varios países (solo si hay una IP pública que medir). */
     buildComponents(server: GameServer): ActionRowBuilder<ButtonBuilder>[] {
-        if (!server.publicAddress) return [];
-        return [new ActionRowBuilder<ButtonBuilder>().addComponents(
-            new ButtonBuilder().setCustomId(`srvping:${server.id}`).setLabel('Ping desde el mundo').setEmoji('📡').setStyle(ButtonStyle.Secondary),
-        )];
+        const buttons: ButtonBuilder[] = [];
+        if (server.mapUrl) buttons.push(new ButtonBuilder().setURL(server.mapUrl).setLabel('Ver mapa').setEmoji('🗺️').setStyle(ButtonStyle.Link));
+        if (server.publicAddress) buttons.push(new ButtonBuilder().setCustomId(`srvping:${server.id}`).setLabel('Ping desde el mundo').setEmoji('📡').setStyle(ButtonStyle.Secondary));
+        return buttons.length ? [new ActionRowBuilder<ButtonBuilder>().addComponents(buttons)] : [];
     }
 
     async handleInteraction(i: Interaction): Promise<void> {
