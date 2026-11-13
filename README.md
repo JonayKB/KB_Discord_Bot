@@ -19,6 +19,7 @@ Bot de Discord de MCKBServers, ahora **modular** y con un **panel web** para ges
 | Whitelist a mano | **RCON** en cada servidor de Minecraft: consola desde el panel y whitelist automática a partir de una campaña de confirmación (un nombre por persona, sin repetidos, comprobado con Mojang, con cola si el servidor está apagado y sin tocar nunca los nombres añadidos a mano) |
 | — | Módulo **Tickets**: panel con botones (un tipo de ticket por botón, con formulario opcional) que crea un canal privado en una categoría con el staff; desde el panel se responden, se atienden, se cierran con o sin motivo y queda el historial con transcripción |
 | — | **Rankings de Minecraft**: el mod `kb_discord_auth` envía las estadísticas de cada jugador (tiempo jugado, muertes, mobs, distancia y logros) y el bot publica y mantiene al día una tabla de clasificación (total y semanal) en los canales que elijas, además del comando `/ranking` |
+| — | **Launcher**: estado de cada servidor público y estadísticas y puesto de cada jugador en JSON públicos (`/servers/status.json`, `/servers/{id}/players/{nombre}`) para KB MC Launcher. Contrato en [`docs/launcher-contract.md`](docs/launcher-contract.md) |
 | — | Módulo **Noticias**: publica los últimos mensajes de un canal en `/news/latest.json` (público) para el launcher, con imágenes propias y encuestas actualizadas |
 | Todo mezclado | Cada función es un módulo independiente que se activa/desactiva al instante |
 

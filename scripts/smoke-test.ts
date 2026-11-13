@@ -574,6 +574,36 @@ async function main() {
         assert.equal((await call('POST', `/api/servers/${mcId}/leaderboards`, { channelId: 'C1', stats: ['jumps'] })).status, 400);
         const lb = (await call('POST', `/api/servers/${mcId}/leaderboards`, { channelId: 'C1', exclude: ['tester'] })).json;
         assert.deepEqual([lb.top, lb.intervalMin, lb.title, lb.periods.length, lb.stats.length], [10, 15, '🏆 {server}', 2, 5], 'valores por defecto');
+        // Datos públicos para el launcher (sin sesión)
+        const anon = (url: string) => call('GET', url, undefined, { cookie: '' });
+        const mcServer = (await call('GET', '/api/servers')).json.servers.find((s: any) => s.id === mcId);
+        assert.equal((await anon('/servers/status.json')).json.servers.some((s: any) => s.id === mcId), false, 'sin dirección pública no se publica');
+        assert.equal((await anon(`/servers/${mcId}/players/Steve`)).status, 404);
+        await call('PUT', `/api/servers/${mcId}`, { ...mcServer, publicAddress: 'play.kb.test:25570', mapUrl: 'map.kb.test' });
+        const feed = await anon('/servers/status.json');
+        assert.equal(feed.status, 200);
+        assert.equal(feed.headers.get('cache-control'), 'no-cache');
+        assert.equal(feed.json.version, 1);
+        const pubServer = feed.json.servers.find((s: any) => s.id === mcId);
+        assert.equal(pubServer.address, 'play.kb.test:25570');
+        assert.equal(pubServer.mapUrl, 'https://map.kb.test/');
+        assert.ok(pubServer.players.every((p: unknown) => typeof p === 'string'), 'solo nombres, sin Discord');
+        assert.equal(JSON.stringify(feed.json).includes('discordId'), false);
+        const steveCard = await anon(`/servers/${mcId}/players/Steve`);
+        assert.equal(steveCard.status, 200);
+        assert.equal(steveCard.json.name, 'Steve');
+        assert.equal(steveCard.json.total.mobKills, 25);
+        assert.equal(steveCard.json.rank.total.mobKills, 1);
+        assert.equal(steveCard.json.rank.total.playTimeSeconds, 2, 'Al_ex* tiene más tiempo');
+        assert.equal(steveCard.json.discordId, undefined, 'el Discord no se publica');
+        assert.equal((await anon(`/servers/${mcId}/players/steve`)).json.name, 'Steve', 'sin distinguir mayúsculas si es único');
+        assert.equal((await anon(`/servers/${mcId}/players/Tester`)).json.rank.total.playTimeSeconds, null, 'excluido del ranking → sin puesto');
+        assert.equal((await anon(`/servers/${mcId}/players/Nadie`)).status, 404);
+        assert.equal((await anon(`/servers/${mcId}/players/${encodeURIComponent('a/b')}`)).status, 400);
+        assert.equal((await anon('/servers/99999/players/Steve')).status, 404);
+        await call('PUT', `/api/servers/${mcId}`, mcServer);
+        ok('launcher: estado y ficha de jugador públicos, solo de servidores con dirección pública y sin Discord');
+
         const sent0 = channelsSent.length;
         const pub = (await call('POST', `/api/servers/${mcId}/leaderboards/${lb.id}/publish`)).json;
         assert.equal(pub.lastError, null);
