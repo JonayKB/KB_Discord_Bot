@@ -15,6 +15,7 @@ import { BotError, HttpError, asyncRoute, bool, strArray } from '../core/http';
 import { getLogs } from '../core/logs';
 import { getServices } from '../core/services';
 import { createStatsIngestRouter } from '../modules/servers/ingest';
+import { createLauncherRouter } from '../modules/servers/launcher';
 import { INGEST_PATH } from '../modules/servers/stats';
 import type { ModuleManager } from '../core/module';
 import { Logger, type LogLevel } from '../utils/Logger';
@@ -57,6 +58,9 @@ export function startWebServer({ client, db, manager }: WebDeps): http.Server {
             res.setHeader('Cache-Control', path.basename(file) === 'latest.json' ? 'no-cache' : 'public, max-age=86400');
         },
     }), (_req, res) => void res.status(404).end());
+
+    // ── Público: estado de los servidores y estadísticas de cada jugador para el launcher (sin sesión) ──
+    app.use('/servers', createLauncherRouter(() => (manager.isRunning('servers') ? getServices() : null)));
 
     // ── Público: estadísticas que envía el mod de Minecraft (autenticado con su API key, sin sesión) ──
     app.use(INGEST_PATH, createStatsIngestRouter(db, () => (manager.isRunning('servers') ? getServices().mcStats : null)));
