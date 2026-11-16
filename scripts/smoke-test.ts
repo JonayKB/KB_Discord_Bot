@@ -1278,6 +1278,24 @@ async function main() {
     assert.equal((await call('POST', `/api/servers/${mcId}/whitelist/${notch.id}/approve`)).status, 400, 'ya está');
     await call('PUT', `/api/servers/${mcId}/whitelist/settings`, { enabled: true, campaignId: wc.id, allowRename: true, renameCooldownDays: 30, autoAdd: true });
     ok('modo "solo avisar": se queda esperando aprobación con el nombre reservado hasta que el staff lo añade');
+
+    await sleep(100);
+    let quiet = mcState.log.length;
+    await whitelist.processAll();
+    assert.equal(mcState.log.length, quiet, 'sin altas ni bajas pendientes no se conecta por RCON');
+    await call('PUT', `/api/servers/${mcId}/whitelist/settings`, { enabled: true, campaignId: wc.id, allowRename: true, renameCooldownDays: 30, autoAdd: false });
+    await wlForm('U6', 'Alex');
+    await sleep(100);
+    quiet = mcState.log.length;
+    await whitelist.processAll();
+    assert.equal(mcState.log.length, quiet, 'tampoco por altas que esperan aprobación');
+    await call('PUT', `/api/servers/${mcId}/whitelist/settings`, { enabled: true, campaignId: wc.id, allowRename: true, renameCooldownDays: 30, autoAdd: true });
+    await sleep(100);
+    assert.ok(wl('Alex'), 'al volver al modo automático se añade');
+    quiet = mcState.log.length;
+    await call('POST', `/api/servers/${mcId}/whitelist/process`);
+    assert.ok(mcState.log.length > quiet, 'el botón Sincronizar sí comprueba');
+    ok('solo se conecta por RCON con altas o bajas pendientes o al pulsar Sincronizar');
     fakeRcon.close();
     fakeMojang.close();
 
