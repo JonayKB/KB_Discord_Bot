@@ -1231,7 +1231,7 @@ async function main() {
     assert.equal((await jebOf()).status, 'active', 'si vuelve a estar, vuelve a activo');
     mcState.whitelist = mcState.whitelist.filter(x => x !== 'Jeb_');
     await call('POST', `/api/servers/${mcId}/whitelist/process`);
-    const ra = await call('POST', `/api/servers/${mcId}/whitelist/${(await jebOf()).id}/readd`);
+    const ra = await call('POST', `/api/servers/${mcId}/whitelist/${(await jebOf()).id}/approve`);
     assert.equal(ra.json.status, 'active', JSON.stringify(ra.json));
     assert.ok(wl('Jeb_'));
     mcState.whitelist = mcState.whitelist.filter(x => x !== 'Jeb_');
@@ -1256,6 +1256,28 @@ async function main() {
     assert.ok(!mcState.log.slice(logLen).includes('whitelist remove Jeb_'));
     assert.equal((await jebOf()).preexisting, false, 'el bot lo sigue gestionando');
     ok('borrar e importar enseguida cancela la baja en vez de fallar');
+
+    // Modo "solo avisar": quien confirma espera aprobación y no se toca el servidor.
+    await call('PUT', `/api/servers/${mcId}/whitelist/settings`, { enabled: true, campaignId: wc.id, allowRename: true, renameCooldownDays: 30, autoAdd: false });
+    const logBefore = mcState.log.length;
+    f = await wlForm('U5', 'Notch');
+    assert.match(f.notes![0], /El staff te añadirá/);
+    const notchOf = async () => (await call('GET', `/api/servers/${mcId}/whitelist`)).json.entries.find((e: any) => e.mcName === 'Notch' && e.status !== 'removed');
+    let notch = await notchOf();
+    assert.equal(notch.status, 'pending_add');
+    assert.equal(notch.awaiting, true);
+    await call('POST', `/api/servers/${mcId}/whitelist/process`);
+    assert.ok(!wl('Notch') && !mcState.log.slice(logBefore).includes('whitelist add Notch'), 'no se añade solo');
+    assert.match((await wlForm('U6', 'notch')).error!, /otra persona/, 'el nombre queda reservado');
+    const ap = await call('POST', `/api/servers/${mcId}/whitelist/${notch.id}/approve`);
+    assert.equal(ap.json.status, 'active', JSON.stringify(ap.json));
+    assert.ok(wl('Notch'));
+    notch = await notchOf();
+    assert.equal(notch.awaiting, false);
+    assert.equal(notch.preexisting, false, 'lo añadió el bot: lo seguirá gestionando');
+    assert.equal((await call('POST', `/api/servers/${mcId}/whitelist/${notch.id}/approve`)).status, 400, 'ya está');
+    await call('PUT', `/api/servers/${mcId}/whitelist/settings`, { enabled: true, campaignId: wc.id, allowRename: true, renameCooldownDays: 30, autoAdd: true });
+    ok('modo "solo avisar": se queda esperando aprobación con el nombre reservado hasta que el staff lo añade');
     fakeRcon.close();
     fakeMojang.close();
 

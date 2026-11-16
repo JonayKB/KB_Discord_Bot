@@ -24,6 +24,8 @@ export interface WhitelistSettings {
     allowRename: boolean;
     renameCooldownDays: number;
     removeOnLeave: boolean;
+    /** Si es false, quien confirma en el formulario espera a que el staff lo apruebe (solo se avisa). */
+    autoAdd: boolean;
 }
 
 /** `missing`: vinculado, pero ya no está en la whitelist real del servidor (lo quitaron a mano). */
@@ -38,6 +40,8 @@ export interface WhitelistEntry {
     mcUuid: string | null;
     status: EntryStatus;
     preexisting: boolean;
+    /** Alta pendiente de que el staff la apruebe (modo "solo avisar"). */
+    awaiting: boolean;
     source: 'form' | 'panel' | 'import';
     addedBy: string | null;
     error: string | null;
@@ -46,19 +50,19 @@ export interface WhitelistEntry {
     updatedAt: number;
 }
 
-interface SettingsRow { server_id: number; enabled: number; campaign_id: number | null; online_mode: number; allow_rename: number; rename_cooldown_days: number; remove_on_leave: number }
+interface SettingsRow { server_id: number; enabled: number; campaign_id: number | null; online_mode: number; allow_rename: number; rename_cooldown_days: number; remove_on_leave: number; auto_add: number }
 interface EntryRow {
     id: number; server_id: number; user_id: string; username: string | null; mc_name: string; mc_uuid: string | null; status: EntryStatus;
-    preexisting: number; source: WhitelistEntry['source']; added_by: string | null; error: string | null; removed_reason: string | null; created_at: number; updated_at: number;
+    preexisting: number; awaiting: number; source: WhitelistEntry['source']; added_by: string | null; error: string | null; removed_reason: string | null; created_at: number; updated_at: number;
 }
 
 const toSettings = (r: SettingsRow): WhitelistSettings => ({
     serverId: r.server_id, enabled: !!r.enabled, campaignId: r.campaign_id, onlineMode: !!r.online_mode,
-    allowRename: !!r.allow_rename, renameCooldownDays: r.rename_cooldown_days, removeOnLeave: !!r.remove_on_leave,
+    allowRename: !!r.allow_rename, renameCooldownDays: r.rename_cooldown_days, removeOnLeave: !!r.remove_on_leave, autoAdd: !!r.auto_add,
 });
 const toEntry = (r: EntryRow): WhitelistEntry => ({
     id: r.id, serverId: r.server_id, userId: r.user_id, username: r.username, mcName: r.mc_name, mcUuid: r.mc_uuid, status: r.status,
-    preexisting: !!r.preexisting, source: r.source, addedBy: r.added_by, error: r.error, removedReason: r.removed_reason, createdAt: r.created_at, updatedAt: r.updated_at,
+    preexisting: !!r.preexisting, awaiting: !!r.awaiting, source: r.source, addedBy: r.added_by, error: r.error, removedReason: r.removed_reason, createdAt: r.created_at, updatedAt: r.updated_at,
 });
 
 const CURRENT = "status IN ('pending_add','active','missing')";
@@ -150,7 +154,7 @@ export class WhitelistService {
 
     settings(serverId: number): WhitelistSettings {
         const r = this.db.prepare('SELECT * FROM whitelist_settings WHERE server_id = ?').get(serverId) as SettingsRow | undefined;
-        return r ? toSettings(r) : { serverId, enabled: false, campaignId: null, onlineMode: true, allowRename: false, renameCooldownDays: 30, removeOnLeave: true };
+        return r ? toSettings(r) : { serverId, enabled: false, campaignId: null, onlineMode: true, allowRename: false, renameCooldownDays: 30, removeOnLeave: true, autoAdd: true };
     }
 
     setSettings(s: WhitelistSettings): WhitelistSettings {
@@ -159,12 +163,15 @@ export class WhitelistService {
         if (s.enabled && !s.campaignId) throw new HttpError(400, 'Elige de qué campaña de confirmación salen los nombres.');
         if (s.campaignId) this.confirmations.requireCampaign(s.campaignId);
         this.db.prepare(`
-            INSERT INTO whitelist_settings (server_id, enabled, campaign_id, online_mode, allow_rename, rename_cooldown_days, remove_on_leave)
-            VALUES (@serverId, @enabled, @campaignId, @onlineMode, @allowRename, @renameCooldownDays, @removeOnLeave)
+            INSERT INTO whitelist_settings (server_id, enabled, campaign_id, online_mode, allow_rename, rename_cooldown_days, remove_on_leave, auto_add)
+            VALUES (@serverId, @enabled, @campaignId, @onlineMode, @allowRename, @renameCooldownDays, @removeOnLeave, @autoAdd)
             ON CONFLICT (server_id) DO UPDATE SET enabled = excluded.enabled, campaign_id = excluded.campaign_id, online_mode = excluded.online_mode,
-                allow_rename = excluded.allow_rename, rename_cooldown_days = excluded.rename_cooldown_days, remove_on_leave = excluded.remove_on_leave
-        `).run({ ...s, enabled: s.enabled ? 1 : 0, onlineMode: s.onlineMode ? 1 : 0, allowRename: s.allowRename ? 1 : 0, removeOnLeave: s.removeOnLeave ? 1 : 0 });
+                allow_rename = excluded.allow_rename, rename_cooldown_days = excluded.rename_cooldown_days, remove_on_leave = excluded.remove_on_leave,
+                auto_add = excluded.auto_add
+        `).run({ ...s, enabled: s.enabled ? 1 : 0, onlineMode: s.onlineMode ? 1 : 0, allowRename: s.allowRename ? 1 : 0, removeOnLeave: s.removeOnLeave ? 1 : 0, autoAdd: s.autoAdd ? 1 : 0 });
         publish('whitelist:changed', { serverId: s.serverId });
+        // Al volver a activar el modo automático, se aplica lo que estaba esperando.
+        if (s.autoAdd && this.active) void this.process(s.serverId).catch(() => undefined);
         return this.settings(s.serverId);
     }
 
@@ -268,12 +275,16 @@ export class WhitelistService {
         if (!MC_NAME.test(name)) throw new HttpError(400, 'Nombre no válido.');
         const now = Date.now();
         const user = this.client.guilds.cache.get(env.guildId)?.members.cache.get(userId)?.user;
+        // Lo que llega del formulario espera aprobación si el modo automático está apagado; lo que hace el staff, no.
+        const awaiting = source === 'form' && !this.settings(serverId).autoAdd;
         const id = this.db.transaction(() => {
             const cur = this.current(serverId, userId);
             const isSame = (e: WhitelistEntry) => e.mcName.toLowerCase() === name.toLowerCase() || (!!uuid && e.mcUuid === uuid);
             if (cur && isSame(cur)) {
                 // Si lo habían quitado a mano del servidor, se vuelve a añadir.
-                if (cur.status === 'missing') this.requeue(cur.id, name, uuid);
+                if (cur.status === 'missing') this.requeue(cur.id, name, uuid, awaiting);
+                // Si el staff registra a quien esperaba aprobación, queda aprobado.
+                else if (cur.awaiting && !awaiting) this.db.prepare('UPDATE whitelist_entries SET awaiting = 0, added_by = coalesce(?, added_by), updated_at = ? WHERE id = ?').run(addedBy, now, cur.id);
                 return cur.id;
             }
             if (cur) this.retire(cur, 'Cambio de nombre');
@@ -287,24 +298,28 @@ export class WhitelistService {
                 // Las bajas solo se envían dentro de process(): si no hay ninguno en marcha, sigue en el
                 // servidor y basta con volver a "activo". Si lo hay, puede estar quitándose ahora mismo:
                 // se pone en cola para añadirlo otra vez (la baja en curso ya no lo marcará como quitado).
-                if (this.running.has(serverId)) this.requeue(leaving.id, name, uuid);
+                if (this.running.has(serverId)) this.requeue(leaving.id, name, uuid, awaiting);
                 else this.db.prepare(`UPDATE whitelist_entries SET status = 'active', mc_name = ?, mc_uuid = coalesce(?, mc_uuid), error = NULL, removed_reason = NULL, updated_at = ? WHERE id = ?`)
                     .run(name, uuid, now, leaving.id);
                 return leaving.id;
             }
             return Number(this.db.prepare(`
-                INSERT INTO whitelist_entries (server_id, user_id, username, mc_name, mc_uuid, status, source, added_by, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, 'pending_add', ?, ?, ?, ?)
-            `).run(serverId, userId, user?.username ?? null, name, uuid, source, addedBy, now, now).lastInsertRowid);
+                INSERT INTO whitelist_entries (server_id, user_id, username, mc_name, mc_uuid, status, awaiting, source, added_by, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, 'pending_add', ?, ?, ?, ?, ?)
+            `).run(serverId, userId, user?.username ?? null, name, uuid, awaiting ? 1 : 0, source, addedBy, now, now).lastInsertRowid);
         })();
+        const saved = toEntry(this.db.prepare('SELECT * FROM whitelist_entries WHERE id = ?').get(id) as EntryRow);
+        if (saved.awaiting && saved.status === 'pending_add') {
+            logger.info(`📝 ${saved.mcName} (${saved.username ?? userId}) pide entrar en la whitelist de "${this.servers.get(serverId)?.name}": esperando aprobación en el panel`);
+        }
         publish('whitelist:changed', { serverId });
-        return toEntry(this.db.prepare('SELECT * FROM whitelist_entries WHERE id = ?').get(id) as EntryRow);
+        return saved;
     }
 
     /** Vuelve a poner una entrada en cola para añadirla al servidor. */
-    private requeue(id: number, name: string, uuid: string | null): void {
-        this.db.prepare(`UPDATE whitelist_entries SET status = 'pending_add', mc_name = ?, mc_uuid = coalesce(?, mc_uuid), error = NULL, removed_reason = NULL, updated_at = ? WHERE id = ?`)
-            .run(name, uuid, Date.now(), id);
+    private requeue(id: number, name: string, uuid: string | null, awaiting = false): void {
+        this.db.prepare(`UPDATE whitelist_entries SET status = 'pending_add', awaiting = ?, mc_name = ?, mc_uuid = coalesce(?, mc_uuid), error = NULL, removed_reason = NULL, updated_at = ? WHERE id = ?`)
+            .run(awaiting ? 1 : 0, name, uuid, Date.now(), id);
     }
 
     /**
@@ -341,13 +356,16 @@ export class WhitelistService {
         publish('whitelist:changed', { serverId: e.serverId });
     }
 
-    /** Vuelve a añadir al servidor a alguien que quitaron a mano. */
-    async readd(entryId: number, by: string): Promise<WhitelistEntry> {
+    /** El staff añade al servidor a quien esperaba aprobación o a quien quitaron a mano. */
+    async approve(entryId: number, by: string): Promise<WhitelistEntry> {
         const r = this.db.prepare('SELECT * FROM whitelist_entries WHERE id = ?').get(entryId) as EntryRow | undefined;
         if (!r) throw new HttpError(404, 'Entrada no encontrada');
-        if (r.status !== 'missing') throw new HttpError(400, 'Solo se puede volver a añadir a quien no está en la whitelist del servidor.');
+        if (r.status !== 'missing' && !(r.status === 'pending_add' && r.awaiting)) {
+            throw new HttpError(400, 'Solo se puede añadir a quien espera aprobación o ya no está en la whitelist del servidor.');
+        }
         this.requeue(r.id, r.mc_name, r.mc_uuid);
-        logger.info(`🔁 ${r.mc_name} (${r.username ?? r.user_id}) se vuelve a añadir a la whitelist por ${by}`);
+        this.db.prepare('UPDATE whitelist_entries SET added_by = ? WHERE id = ?').run(by, r.id);
+        logger.info(`✅ ${r.mc_name} (${r.username ?? r.user_id}) se añade a la whitelist por ${by}`);
         publish('whitelist:changed', { serverId: r.server_id });
         await this.process(r.server_id).catch(() => undefined);
         return toEntry(this.db.prepare('SELECT * FROM whitelist_entries WHERE id = ?').get(entryId) as EntryRow);
@@ -381,8 +399,9 @@ export class WhitelistService {
             }
             try {
                 const c = await this.check(serverId, r.user_id, r.answer, { fromPanel: false });
-                // Ya lo tiene: salvo que lo hayan quitado a mano del servidor, entonces se vuelve a añadir.
-                if (c.unchanged && this.current(serverId, r.user_id)?.status !== 'missing') { out.unchanged++; continue; }
+                // Ya lo tiene: salvo que lo hayan quitado a mano o esté esperando aprobación (importar lo aprueba).
+                const cur = this.current(serverId, r.user_id);
+                if (c.unchanged && cur?.status !== 'missing' && !cur?.awaiting) { out.unchanged++; continue; }
                 this.register(serverId, r.user_id, c.name, c.uuid, 'import', by);
                 out.added++;
             } catch (err) {
@@ -417,6 +436,7 @@ export class WhitelistService {
             if (this.active) await this.process(s.serverId).catch(() => undefined);
             const now = this.db.prepare('SELECT status, error FROM whitelist_entries WHERE id = ?').get(e.id) as { status: EntryStatus; error: string | null };
             if (now.status === 'active') notes.push(`✅ Estás en la whitelist de **${server.name}** como \`${c.name}\`.`);
+            else if (e.awaiting) notes.push(`📝 Tu solicitud para entrar en **${server.name}** como \`${c.name}\` está registrada. El staff te añadirá a la whitelist.`);
             else if (now.status === 'error') notes.push(`⚠️ El servidor ${server.name} no aceptó \`${c.name}\`: ${now.error}. Avisa al staff.`);
             else notes.push(`⏳ Te añadiré a la whitelist de **${server.name}** como \`${c.name}\` en cuanto el servidor esté disponible.`);
         }
@@ -495,7 +515,7 @@ export class WhitelistService {
 
         const settings = this.settings(serverId);
         // Solo si sigue en el estado en que se leyó: si mientras tanto se canceló la baja (o el alta), no se pisa.
-        const update = this.db.prepare('UPDATE whitelist_entries SET status = ?, mc_name = ?, preexisting = ?, error = ?, updated_at = ? WHERE id = ? AND status = ?');
+        const update = this.db.prepare('UPDATE whitelist_entries SET status = ?, mc_name = ?, preexisting = ?, error = ?, awaiting = 0, updated_at = ? WHERE id = ? AND status = ?');
         // Primero las bajas (así un cambio de nombre nunca deja dos nombres a la vez).
         for (const e of pending.filter(p => p.status === 'pending_remove')) {
             let name = e.mcName;
@@ -512,6 +532,9 @@ export class WhitelistService {
             }
         }
         for (const e of pending.filter(p => p.status === 'pending_add')) {
+            // Modo "solo avisar": no se añade hasta que el staff lo apruebe (si ya está en el servidor, se vincula).
+            const waits = e.awaiting && !settings.autoAdd;
+            if (waits && !onServer.has(e.mcName.toLowerCase())) continue;
             if (!MC_NAME.test(e.mcName)) { update.run('error', e.mcName, 0, 'Nombre no válido', Date.now(), e.id, 'pending_add'); continue; }
             if (onServer.has(e.mcName.toLowerCase())) {
                 // Ya estaba (lo puso alguien a mano): se vincula, pero el bot nunca lo quitará.

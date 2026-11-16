@@ -158,6 +158,7 @@ export function createServersModule(service: ServersService, whitelist: Whitelis
             allowRename: bool(b.allowRename),
             renameCooldownDays: b.renameCooldownDays === undefined ? 30 : int(b.renameCooldownDays, 'renameCooldownDays', { min: 0, max: 365 }),
             removeOnLeave: b.removeOnLeave === undefined ? true : bool(b.removeOnLeave),
+            autoAdd: b.autoAdd === undefined ? true : bool(b.autoAdd),
         }));
     });
 
@@ -172,8 +173,8 @@ export function createServersModule(service: ServersService, whitelist: Whitelis
         res.json({ ok: true });
     });
 
-    router.post('/:id/whitelist/:entryId/readd', asyncRoute(async (req, res) => {
-        res.json(await whitelist.readd(int(req.params.entryId, 'entryId', { min: 1 }), who(req)));
+    router.post('/:id/whitelist/:entryId/approve', asyncRoute(async (req, res) => {
+        res.json(await whitelist.approve(int(req.params.entryId, 'entryId', { min: 1 }), who(req)));
     }));
 
     router.post('/:id/whitelist/import', asyncRoute(async (req, res) => res.json(await whitelist.importConfirmed(sid(req.params.id), who(req)))));

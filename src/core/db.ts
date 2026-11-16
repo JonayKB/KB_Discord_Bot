@@ -411,6 +411,10 @@ const MIGRATIONS: string[] = [
     CREATE UNIQUE INDEX ux_wl_uuid ON whitelist_entries (server_id, mc_uuid) WHERE mc_uuid IS NOT NULL AND status IN ('pending_add','active','missing','pending_remove');
     CREATE INDEX idx_wl_user ON whitelist_entries (user_id);
     `,
+    /* v12: modo "solo avisar": las altas del formulario esperan a que el staff las apruebe */ `
+    ALTER TABLE whitelist_settings ADD COLUMN auto_add INTEGER NOT NULL DEFAULT 1;  -- 0 = solo avisar
+    ALTER TABLE whitelist_entries ADD COLUMN awaiting INTEGER NOT NULL DEFAULT 0;    -- alta pendiente de aprobar
+    `,
 ];
 
 export function openDb(file = path.join(DATA_DIR, 'bot.db')): DB {
