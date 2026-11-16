@@ -172,6 +172,10 @@ export function createServersModule(service: ServersService, whitelist: Whitelis
         res.json({ ok: true });
     });
 
+    router.post('/:id/whitelist/:entryId/readd', asyncRoute(async (req, res) => {
+        res.json(await whitelist.readd(int(req.params.entryId, 'entryId', { min: 1 }), who(req)));
+    }));
+
     router.post('/:id/whitelist/import', asyncRoute(async (req, res) => res.json(await whitelist.importConfirmed(sid(req.params.id), who(req)))));
 
     router.post('/:id/whitelist/process', asyncRoute(async (req, res) => {

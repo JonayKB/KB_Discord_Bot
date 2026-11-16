@@ -382,6 +382,35 @@ const MIGRATIONS: string[] = [
     /* v10: enlace al mapa web del servidor (BlueMap, Dynmap…) */ `
     ALTER TABLE game_servers ADD COLUMN map_url TEXT;
     `,
+    /*
+     * v11: estado "missing" en la whitelist: está vinculado pero ya no aparece en la whitelist real
+     * del servidor (alguien lo quitó a mano). Sigue siendo su nombre (nadie más puede cogerlo).
+     */ `
+    CREATE TABLE whitelist_entries_v11 (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        server_id      INTEGER NOT NULL REFERENCES game_servers (id) ON DELETE CASCADE,
+        user_id        TEXT NOT NULL,
+        username       TEXT,
+        mc_name        TEXT NOT NULL,
+        mc_uuid        TEXT,
+        status         TEXT NOT NULL CHECK (status IN ('pending_add','active','missing','pending_remove','removed','error')),
+        preexisting    INTEGER NOT NULL DEFAULT 0,
+        source         TEXT NOT NULL DEFAULT 'form',
+        added_by       TEXT,
+        error          TEXT,
+        removed_reason TEXT,
+        created_at     INTEGER NOT NULL,
+        updated_at     INTEGER NOT NULL
+    );
+    INSERT INTO whitelist_entries_v11 (id, server_id, user_id, username, mc_name, mc_uuid, status, preexisting, source, added_by, error, removed_reason, created_at, updated_at)
+        SELECT id, server_id, user_id, username, mc_name, mc_uuid, status, preexisting, source, added_by, error, removed_reason, created_at, updated_at FROM whitelist_entries;
+    DROP TABLE whitelist_entries;
+    ALTER TABLE whitelist_entries_v11 RENAME TO whitelist_entries;
+    CREATE UNIQUE INDEX ux_wl_user ON whitelist_entries (server_id, user_id) WHERE status IN ('pending_add','active','missing');
+    CREATE UNIQUE INDEX ux_wl_name ON whitelist_entries (server_id, lower(mc_name)) WHERE status IN ('pending_add','active','missing','pending_remove');
+    CREATE UNIQUE INDEX ux_wl_uuid ON whitelist_entries (server_id, mc_uuid) WHERE mc_uuid IS NOT NULL AND status IN ('pending_add','active','missing','pending_remove');
+    CREATE INDEX idx_wl_user ON whitelist_entries (user_id);
+    `,
 ];
 
 export function openDb(file = path.join(DATA_DIR, 'bot.db')): DB {

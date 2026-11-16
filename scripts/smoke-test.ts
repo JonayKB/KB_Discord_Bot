@@ -1220,6 +1220,42 @@ async function main() {
     assert.deepEqual(serverView.map((x: any) => [x.name, !!x.userId]), [['AdminManual', false], ['Jeb_', true]]);
     assert.throws(() => db.prepare("INSERT INTO whitelist_entries (server_id, user_id, mc_name, status, created_at, updated_at) VALUES (?, 'X9', 'jeb_', 'active', 0, 0)").run(mcId), /UNIQUE/);
     ok('vista de la whitelist real y garantía en la base de datos');
+
+    const jebOf = async () => (await call('GET', `/api/servers/${mcId}/whitelist`)).json.entries.find((e: any) => e.mcName === 'Jeb_');
+    mcState.whitelist = mcState.whitelist.filter(x => x !== 'Jeb_'); // alguien lo quita a mano por consola
+    await call('POST', `/api/servers/${mcId}/whitelist/process`);
+    assert.equal((await jebOf()).status, 'missing', 'al sincronizar se ve que ya no está');
+    assert.equal((await call('POST', `/api/servers/${mcId}/whitelist`, { userId: 'U4', name: 'Jeb_' })).status, 400, 'sigue siendo su nombre');
+    mcState.whitelist.push('Jeb_');
+    await call('POST', `/api/servers/${mcId}/whitelist/process`);
+    assert.equal((await jebOf()).status, 'active', 'si vuelve a estar, vuelve a activo');
+    mcState.whitelist = mcState.whitelist.filter(x => x !== 'Jeb_');
+    await call('POST', `/api/servers/${mcId}/whitelist/process`);
+    const ra = await call('POST', `/api/servers/${mcId}/whitelist/${(await jebOf()).id}/readd`);
+    assert.equal(ra.json.status, 'active', JSON.stringify(ra.json));
+    assert.ok(wl('Jeb_'));
+    mcState.whitelist = mcState.whitelist.filter(x => x !== 'Jeb_');
+    await call('POST', `/api/servers/${mcId}/whitelist/process`);
+    let imp2 = (await call('POST', `/api/servers/${mcId}/whitelist/import`)).json;
+    assert.equal(imp2.added, 1, JSON.stringify(imp2));
+    assert.ok(wl('Jeb_') && (await jebOf()).status === 'active');
+    ok('quitados a mano del servidor: se marcan al sincronizar y se pueden volver a añadir (o importar)');
+
+    // Borrarlo del panel e importar enseguida (la baja aún pendiente) no choca con el índice único.
+    await call('PUT', `/api/servers/${mcId}/rcon`, { port: 38299 }); // servidor caído: la baja se queda pendiente
+    await call('DELETE', `/api/servers/${mcId}/whitelist/${(await jebOf()).id}`);
+    assert.equal((await call('GET', `/api/servers/${mcId}/whitelist`)).json.entries.find((e: any) => e.mcName === 'Jeb_').status, 'pending_remove');
+    imp2 = (await call('POST', `/api/servers/${mcId}/whitelist/import`)).json;
+    assert.ok(!imp2.skipped.some((x: any) => /constraint/i.test(x.reason)), JSON.stringify(imp2));
+    assert.equal((await jebOf()).status, 'active', 'se cancela la baja');
+    const logLen = mcState.log.length;
+    await call('PUT', `/api/servers/${mcId}/rcon`, { port: 38210 });
+    await sleep(100);
+    await call('POST', `/api/servers/${mcId}/whitelist/process`);
+    assert.ok(wl('Jeb_') && (await jebOf()).status === 'active', 'sigue en el servidor');
+    assert.ok(!mcState.log.slice(logLen).includes('whitelist remove Jeb_'));
+    assert.equal((await jebOf()).preexisting, false, 'el bot lo sigue gestionando');
+    ok('borrar e importar enseguida cancela la baja en vez de fallar');
     fakeRcon.close();
     fakeMojang.close();
 

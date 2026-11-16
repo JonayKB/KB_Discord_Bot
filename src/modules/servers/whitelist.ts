@@ -26,7 +26,8 @@ export interface WhitelistSettings {
     removeOnLeave: boolean;
 }
 
-export type EntryStatus = 'pending_add' | 'active' | 'pending_remove' | 'removed' | 'error';
+/** `missing`: vinculado, pero ya no está en la whitelist real del servidor (lo quitaron a mano). */
+export type EntryStatus = 'pending_add' | 'active' | 'missing' | 'pending_remove' | 'removed' | 'error';
 
 export interface WhitelistEntry {
     id: number;
@@ -60,8 +61,8 @@ const toEntry = (r: EntryRow): WhitelistEntry => ({
     preexisting: !!r.preexisting, source: r.source, addedBy: r.added_by, error: r.error, removedReason: r.removed_reason, createdAt: r.created_at, updatedAt: r.updated_at,
 });
 
-const CURRENT = "status IN ('pending_add','active')";
-const HOLDS_NAME = "status IN ('pending_add','active','pending_remove')";
+const CURRENT = "status IN ('pending_add','active','missing')";
+const HOLDS_NAME = "status IN ('pending_add','active','missing','pending_remove')";
 
 export class WhitelistService {
     active = false;
@@ -138,8 +139,10 @@ export class WhitelistService {
     /** Nombres que hay ahora mismo en la whitelist del servidor. */
     async serverList(serverId: number): Promise<string[]> {
         const [out] = await this.run(serverId, ['whitelist list']);
+        if (/no whitelisted|there are 0 /i.test(out)) return [];
         const m = /:\s*(.*)$/s.exec(out);
-        if (!m || /no whitelisted/i.test(out)) return [];
+        // Si no entendemos la respuesta, mejor fallar que creer que la whitelist está vacía.
+        if (!m) throw new Error(`Respuesta inesperada a "whitelist list": ${out.slice(0, 120)}`);
         return m[1].split(/,\s*(?:and\s+)?|\s+and\s+/).map(s => s.trim()).filter(Boolean);
     }
 
@@ -267,8 +270,28 @@ export class WhitelistService {
         const user = this.client.guilds.cache.get(env.guildId)?.members.cache.get(userId)?.user;
         const id = this.db.transaction(() => {
             const cur = this.current(serverId, userId);
-            if (cur && (cur.mcName.toLowerCase() === name.toLowerCase() || (uuid && cur.mcUuid === uuid))) return cur.id;
+            const isSame = (e: WhitelistEntry) => e.mcName.toLowerCase() === name.toLowerCase() || (!!uuid && e.mcUuid === uuid);
+            if (cur && isSame(cur)) {
+                // Si lo habían quitado a mano del servidor, se vuelve a añadir.
+                if (cur.status === 'missing') this.requeue(cur.id, name, uuid);
+                return cur.id;
+            }
             if (cur) this.retire(cur, 'Cambio de nombre');
+            // Su mismo nombre aún se está quitando (p. ej. justo lo borraron del panel): se cancela la baja
+            // en vez de crear otra fila con el mismo nombre (lo impediría el índice único).
+            const leaving = this.db.prepare(`
+                SELECT * FROM whitelist_entries WHERE server_id = ? AND user_id = ? AND status = 'pending_remove'
+                  AND (lower(mc_name) = lower(?) OR (? IS NOT NULL AND mc_uuid = ?)) LIMIT 1
+            `).get(serverId, userId, name, uuid, uuid) as EntryRow | undefined;
+            if (leaving) {
+                // Las bajas solo se envían dentro de process(): si no hay ninguno en marcha, sigue en el
+                // servidor y basta con volver a "activo". Si lo hay, puede estar quitándose ahora mismo:
+                // se pone en cola para añadirlo otra vez (la baja en curso ya no lo marcará como quitado).
+                if (this.running.has(serverId)) this.requeue(leaving.id, name, uuid);
+                else this.db.prepare(`UPDATE whitelist_entries SET status = 'active', mc_name = ?, mc_uuid = coalesce(?, mc_uuid), error = NULL, removed_reason = NULL, updated_at = ? WHERE id = ?`)
+                    .run(name, uuid, now, leaving.id);
+                return leaving.id;
+            }
             return Number(this.db.prepare(`
                 INSERT INTO whitelist_entries (server_id, user_id, username, mc_name, mc_uuid, status, source, added_by, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, 'pending_add', ?, ?, ?, ?)
@@ -278,9 +301,18 @@ export class WhitelistService {
         return toEntry(this.db.prepare('SELECT * FROM whitelist_entries WHERE id = ?').get(id) as EntryRow);
     }
 
-    /** Marca un nombre para quitarlo. Si nunca llegó a añadirse o ya estaba antes, se cierra sin tocar el servidor. */
+    /** Vuelve a poner una entrada en cola para añadirla al servidor. */
+    private requeue(id: number, name: string, uuid: string | null): void {
+        this.db.prepare(`UPDATE whitelist_entries SET status = 'pending_add', mc_name = ?, mc_uuid = coalesce(?, mc_uuid), error = NULL, removed_reason = NULL, updated_at = ? WHERE id = ?`)
+            .run(name, uuid, Date.now(), id);
+    }
+
+    /**
+     * Marca un nombre para quitarlo. Si nunca llegó a añadirse, ya estaba antes o ya no está en el
+     * servidor, se cierra sin tocar el servidor.
+     */
     private retire(e: WhitelistEntry, reason: string): void {
-        const status: EntryStatus = e.status === 'pending_add' || e.preexisting ? 'removed' : 'pending_remove';
+        const status: EntryStatus = e.status === 'pending_add' || e.status === 'missing' || e.preexisting ? 'removed' : 'pending_remove';
         this.db.prepare('UPDATE whitelist_entries SET status = ?, removed_reason = ?, error = NULL, updated_at = ? WHERE id = ?').run(status, reason, Date.now(), e.id);
     }
 
@@ -307,6 +339,18 @@ export class WhitelistService {
             if (this.active) void this.process(e.serverId);
         }
         publish('whitelist:changed', { serverId: e.serverId });
+    }
+
+    /** Vuelve a añadir al servidor a alguien que quitaron a mano. */
+    async readd(entryId: number, by: string): Promise<WhitelistEntry> {
+        const r = this.db.prepare('SELECT * FROM whitelist_entries WHERE id = ?').get(entryId) as EntryRow | undefined;
+        if (!r) throw new HttpError(404, 'Entrada no encontrada');
+        if (r.status !== 'missing') throw new HttpError(400, 'Solo se puede volver a añadir a quien no está en la whitelist del servidor.');
+        this.requeue(r.id, r.mc_name, r.mc_uuid);
+        logger.info(`🔁 ${r.mc_name} (${r.username ?? r.user_id}) se vuelve a añadir a la whitelist por ${by}`);
+        publish('whitelist:changed', { serverId: r.server_id });
+        await this.process(r.server_id).catch(() => undefined);
+        return toEntry(this.db.prepare('SELECT * FROM whitelist_entries WHERE id = ?').get(entryId) as EntryRow);
     }
 
     /** Alta desde el panel (el staff puede cambiar el nombre aunque el usuario no pueda). */
@@ -337,7 +381,8 @@ export class WhitelistService {
             }
             try {
                 const c = await this.check(serverId, r.user_id, r.answer, { fromPanel: false });
-                if (c.unchanged) { out.unchanged++; continue; }
+                // Ya lo tiene: salvo que lo hayan quitado a mano del servidor, entonces se vuelve a añadir.
+                if (c.unchanged && this.current(serverId, r.user_id)?.status !== 'missing') { out.unchanged++; continue; }
                 this.register(serverId, r.user_id, c.name, c.uuid, 'import', by);
                 out.added++;
             } catch (err) {
@@ -394,7 +439,8 @@ export class WhitelistService {
 
     async processAll(): Promise<void> {
         if (!this.active) return;
-        const ids = (this.db.prepare("SELECT DISTINCT server_id FROM whitelist_entries WHERE status IN ('pending_add','pending_remove')").all() as Array<{ server_id: number }>).map(r => r.server_id);
+        // Lo pendiente, y además se comprueba que los que deberían estar sigan en la whitelist real.
+        const ids = (this.db.prepare("SELECT DISTINCT server_id FROM whitelist_entries WHERE status IN ('pending_add','pending_remove','active','missing')").all() as Array<{ server_id: number }>).map(r => r.server_id);
         for (const id of ids) await this.process(id).catch(err => logger.warn(`Whitelist de ${id}: ${(err as Error).message}`));
     }
 
@@ -409,7 +455,8 @@ export class WhitelistService {
 
     private async doProcess(serverId: number): Promise<void> {
         const pending = (this.db.prepare("SELECT * FROM whitelist_entries WHERE server_id = ? AND status IN ('pending_add','pending_remove') ORDER BY status DESC, id").all(serverId) as EntryRow[]).map(toEntry);
-        if (!pending.length || !this.servers.get(serverId)) return;
+        const linked = (this.db.prepare("SELECT * FROM whitelist_entries WHERE server_id = ? AND status IN ('active','missing')").all(serverId) as EntryRow[]).map(toEntry);
+        if ((!pending.length && !linked.length) || !this.servers.get(serverId)) return;
         const setError = (ids: number[], msg: string) => {
             const st = this.db.prepare('UPDATE whitelist_entries SET error = ?, updated_at = ? WHERE id = ?');
             for (const id of ids) st.run(msg, Date.now(), id);
@@ -419,13 +466,36 @@ export class WhitelistService {
         try {
             onServer = new Set((await this.serverList(serverId)).map(n => n.toLowerCase()));
         } catch (err) {
-            setError(pending.map(p => p.id), (err as Error).message);
-            publish('whitelist:changed', { serverId });
+            if (pending.length) {
+                setError(pending.map(p => p.id), (err as Error).message);
+                publish('whitelist:changed', { serverId });
+            }
+            return;
+        }
+
+        // Sincroniza con la whitelist real: quien deja de aparecer pasa a "no está" y quien vuelve, a activo.
+        // El cambio solo se aplica si la fila sigue en el mismo estado (no pisa lo que se haya hecho mientras).
+        const flip = this.db.prepare('UPDATE whitelist_entries SET status = ?, error = NULL, updated_at = ? WHERE id = ? AND status = ?');
+        let changed = pending.length > 0;
+        for (const e of linked) {
+            const there = onServer.has(e.mcName.toLowerCase());
+            if (e.status === 'active' && !there) {
+                if (flip.run('missing', Date.now(), e.id, 'active').changes) {
+                    changed = true;
+                    logger.warn(`⚠️ ${e.mcName} (${e.username ?? e.userId}) ya no está en la whitelist de "${this.servers.get(serverId)?.name}" (¿lo quitaron a mano?)`);
+                }
+            } else if (e.status === 'missing' && there) {
+                if (flip.run('active', Date.now(), e.id, 'missing').changes) changed = true;
+            }
+        }
+        if (!pending.length) {
+            if (changed) publish('whitelist:changed', { serverId });
             return;
         }
 
         const settings = this.settings(serverId);
-        const update = this.db.prepare('UPDATE whitelist_entries SET status = ?, mc_name = ?, preexisting = ?, error = ?, updated_at = ? WHERE id = ?');
+        // Solo si sigue en el estado en que se leyó: si mientras tanto se canceló la baja (o el alta), no se pisa.
+        const update = this.db.prepare('UPDATE whitelist_entries SET status = ?, mc_name = ?, preexisting = ?, error = ?, updated_at = ? WHERE id = ? AND status = ?');
         // Primero las bajas (así un cambio de nombre nunca deja dos nombres a la vez).
         for (const e of pending.filter(p => p.status === 'pending_remove')) {
             let name = e.mcName;
@@ -434,7 +504,7 @@ export class WhitelistService {
             try {
                 const [out] = await this.run(serverId, [`whitelist remove ${name}`]);
                 if (/removed|not whitelisted|isn't whitelisted|is not whitelisted|not on the whitelist/i.test(out)) {
-                    update.run('removed', e.mcName, e.preexisting ? 1 : 0, null, Date.now(), e.id);
+                    update.run('removed', e.mcName, e.preexisting ? 1 : 0, null, Date.now(), e.id, 'pending_remove');
                     logger.info(`➖ ${name} quitado de la whitelist (${e.removedReason ?? ''})`);
                 } else setError([e.id], out || 'Respuesta inesperada del servidor');
             } catch (err) {
@@ -442,19 +512,19 @@ export class WhitelistService {
             }
         }
         for (const e of pending.filter(p => p.status === 'pending_add')) {
-            if (!MC_NAME.test(e.mcName)) { update.run('error', e.mcName, 0, 'Nombre no válido', Date.now(), e.id); continue; }
+            if (!MC_NAME.test(e.mcName)) { update.run('error', e.mcName, 0, 'Nombre no válido', Date.now(), e.id, 'pending_add'); continue; }
             if (onServer.has(e.mcName.toLowerCase())) {
                 // Ya estaba (lo puso alguien a mano): se vincula, pero el bot nunca lo quitará.
-                update.run('active', e.mcName, 1, null, Date.now(), e.id);
+                update.run('active', e.mcName, 1, null, Date.now(), e.id, 'pending_add');
                 continue;
             }
             try {
                 const [out] = await this.run(serverId, [`whitelist add ${e.mcName}`]);
                 if (/added|already/i.test(out)) {
-                    update.run('active', e.mcName, 0, null, Date.now(), e.id);
+                    update.run('active', e.mcName, 0, null, Date.now(), e.id, 'pending_add');
                     logger.info(`➕ ${e.mcName} (${e.username ?? e.userId}) añadido a la whitelist`);
                 } else if (/does not exist|doesn't exist|unknown|could not|couldn't/i.test(out)) {
-                    update.run('error', e.mcName, 0, out, Date.now(), e.id);
+                    update.run('error', e.mcName, 0, out, Date.now(), e.id, 'pending_add');
                 } else setError([e.id], out || 'Respuesta inesperada del servidor');
             } catch (err) {
                 setError([e.id], (err as Error).message);
