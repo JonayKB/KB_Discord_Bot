@@ -6,6 +6,7 @@ import { Check, Empty, Icon, Modal, Spinner, Switch, UserPicker, errMsg, remembe
 
 const STATUS: Record<WhitelistStatus, [string, string]> = {
     active: ['En la whitelist', 'ok'],
+    missing: ['No está en el servidor', 'danger'],
     pending_add: ['Pendiente de añadir', 'warn'],
     pending_remove: ['Pendiente de quitar', 'warn'],
     removed: ['Quitado', ''],
@@ -141,6 +142,8 @@ function WhitelistPanel({ server, running }: { server: GameServer; running: bool
 
     if (!settings || !entries) return <Spinner />;
     const set = (patch: Partial<WhitelistSettings>) => { setSettings({ ...settings, ...patch }); setDirty(true); };
+    /** Confirmó en el formulario y espera a que el staff lo añada (modo "solo avisar"). */
+    const waiting = (e: WhitelistEntry) => e.status === 'pending_add' && e.awaiting && !settings.autoAdd;
 
     const saveSettings = async () => {
         try { setSettings(await put<WhitelistSettings>(`/servers/${server.id}/whitelist/settings`, settings)); setDirty(false); toast.ok('Whitelist guardada'); }
@@ -149,11 +152,18 @@ function WhitelistPanel({ server, running }: { server: GameServer; running: bool
     const remove = async (e: WhitelistEntry) => {
         const cleanup = e.status === 'removed' || e.status === 'error';
         if (!cleanup && !(await confirm({
-            title: `Quitar ${e.mcName}`,
-            message: e.preexisting ? <>Ya estaba en la whitelist antes de vincularlo, así que <b>no se quitará del servidor</b>: solo se desvincula de este usuario.</> : <>Se quitará <b>{e.mcName}</b> de la whitelist del servidor.</>,
-            confirmLabel: 'Quitar', danger: true,
+            title: waiting(e) ? `Rechazar ${e.mcName}` : `Quitar ${e.mcName}`,
+            message: waiting(e) ? <>No se añadirá <b>{e.mcName}</b> a la whitelist y su nombre quedará libre.</> : e.status === 'missing' ? <>Ya no está en la whitelist del servidor: solo se desvincula de este usuario.</> : e.preexisting ? <>Ya estaba en la whitelist antes de vincularlo, así que <b>no se quitará del servidor</b>: solo se desvincula de este usuario.</> : <>Se quitará <b>{e.mcName}</b> de la whitelist del servidor.</>,
+            confirmLabel: waiting(e) ? 'Rechazar' : 'Quitar', danger: true,
         }))) return;
         try { await del(`/servers/${server.id}/whitelist/${e.id}`); load(); } catch (err) { toast.error(errMsg(err)); }
+    };
+    const approve = async (e: WhitelistEntry) => {
+        try {
+            const r = await post<WhitelistEntry>(`/servers/${server.id}/whitelist/${e.id}/approve`);
+            toast.ok(r.status === 'active' ? `${r.mcName} añadido a la whitelist` : `${r.mcName} se añadirá en cuanto el servidor responda`);
+            load();
+        } catch (err) { toast.error(errMsg(err)); }
     };
     const action = async (path: string, ok: string) => {
         setBusy(true);
@@ -168,8 +178,10 @@ function WhitelistPanel({ server, running }: { server: GameServer; running: bool
         finally { setBusy(false); }
     };
 
-    const pending = entries.filter(e => e.status === 'pending_add' || e.status === 'pending_remove').length;
+    const awaitingCount = entries.filter(waiting).length;
+    const pending = entries.filter(e => (e.status === 'pending_add' && !waiting(e)) || e.status === 'pending_remove').length;
     const activeCount = entries.filter(e => e.status === 'active').length;
+    const missingCount = entries.filter(e => e.status === 'missing').length;
 
     return (
         <div className="stack" style={{ gap: 12 }}>
@@ -193,6 +205,8 @@ function WhitelistPanel({ server, running }: { server: GameServer; running: bool
                 <div className="stack" style={{ gap: 8 }}>
                     <Check checked={settings.onlineMode} onChange={onlineMode => set({ onlineMode })} label="Servidor premium (online-mode)"
                         hint="Comprueba con Mojang que la cuenta existe y guarda su UUID: ni con otras mayúsculas ni tras cambiar el nombre en Minecraft se puede registrar la misma cuenta dos veces." />
+                    <Check checked={settings.autoAdd} onChange={autoAdd => set({ autoAdd })} label="Añadir automáticamente"
+                        hint={settings.autoAdd ? 'Quien confirma entra en la whitelist al momento.' : 'Solo te avisa: quien confirma queda esperando aprobación (con el nombre reservado) hasta que pulses Añadir.'} />
                     <Check checked={settings.removeOnLeave} onChange={removeOnLeave => set({ removeOnLeave })} label="Quitar de la whitelist al salir del Discord (o ser baneado)" />
                 </div>
             </div>
@@ -215,12 +229,14 @@ function WhitelistPanel({ server, running }: { server: GameServer; running: bool
                     <b>Jugadores</b>
                     <span className="badge ok">{activeCount} en la whitelist</span>
                     {pending > 0 && <span className="badge warn" title="Se aplican en cuanto el servidor responde por RCON">{pending} pendientes</span>}
+                    {awaitingCount > 0 && <span className="badge warn" title="Confirmaron en el formulario y esperan a que los añadas">{awaitingCount} esperando aprobación</span>}
+                    {missingCount > 0 && <span className="badge danger" title="Vinculados, pero alguien los quitó de la whitelist del servidor">{missingCount} no están en el servidor</span>}
                 </div>
                 <div className="row wrap">
                     <label className="row small muted"><input type="checkbox" checked={history} onChange={e => setHistory(e.target.checked)} /> Ver quitados</label>
                     <button className="btn sm" disabled={!running} onClick={() => setAdding(true)}><Icon name="plus" size={14} /> Añadir</button>
                     <button className="btn sm" disabled={!running || busy || !settings.campaignId} onClick={() => action('import', '')} title="Añade a los que ya confirmaron antes de activar la whitelist">Importar confirmados</button>
-                    {pending > 0 && <button className="btn sm" disabled={!running || busy} onClick={() => action('process', 'Pendientes procesados')}><Icon name="refresh" size={14} /> Reintentar</button>}
+                    <button className="btn sm" disabled={!running || busy} onClick={() => action('process', 'Whitelist sincronizada')} title="Aplica lo pendiente y comprueba quién sigue de verdad en la whitelist del servidor"><Icon name="refresh" size={14} /> Sincronizar</button>
                     <button className="btn sm ghost" disabled={!running} onClick={() => setViewServer(true)}>Ver whitelist del servidor</button>
                 </div>
             </div>
@@ -235,12 +251,15 @@ function WhitelistPanel({ server, running }: { server: GameServer; running: bool
                                     <td><WhoCell e={e} /></td>
                                     <td className="mono">{e.mcName}{e.preexisting && <span className="badge" style={{ marginLeft: 6 }} title="Ya estaba en la whitelist: el bot nunca lo quitará del servidor">ya estaba</span>}</td>
                                     <td>
-                                        <span className={`badge ${STATUS[e.status][1]}`}>{STATUS[e.status][0]}</span>
+                                        {waiting(e) ? <span className="badge warn">Esperando aprobación</span> : <span className={`badge ${STATUS[e.status][1]}`}>{STATUS[e.status][0]}</span>}
                                         {e.error && <div className="small" style={{ color: 'var(--danger)' }}>{e.error}</div>}
                                         {e.status === 'removed' && e.removedReason && <div className="small muted">{e.removedReason}</div>}
                                     </td>
                                     <td className="small muted" title={fmtDateTime(e.createdAt)}>{fmtRelative(e.createdAt)}{e.source !== 'form' && ` · ${e.source === 'panel' ? `panel${e.addedBy ? ` (${e.addedBy})` : ''}` : 'importado'}`}</td>
-                                    <td style={{ textAlign: 'right' }}>
+                                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                                        {(e.status === 'missing' || waiting(e)) && (
+                                            <button className="btn sm ghost" disabled={!running} onClick={() => approve(e)} title="Añadirlo a la whitelist del servidor">{e.status === 'missing' ? 'Volver a añadir' : 'Añadir'}</button>
+                                        )}
                                         {e.status !== 'pending_remove' && (
                                             <button className="btn sm ghost icon" disabled={!running} onClick={() => remove(e)} aria-label={e.status === 'removed' || e.status === 'error' ? 'Borrar del historial' : `Quitar ${e.mcName}`}><Icon name="trash" size={14} /></button>
                                         )}
