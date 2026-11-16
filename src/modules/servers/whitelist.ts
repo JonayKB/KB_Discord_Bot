@@ -459,8 +459,13 @@ export class WhitelistService {
 
     async processAll(): Promise<void> {
         if (!this.active) return;
-        // Lo pendiente, y además se comprueba que los que deberían estar sigan en la whitelist real.
-        const ids = (this.db.prepare("SELECT DISTINCT server_id FROM whitelist_entries WHERE status IN ('pending_add','pending_remove','active','missing')").all() as Array<{ server_id: number }>).map(r => r.server_id);
+        // Solo los servidores con altas o bajas por aplicar, para no conectarse por RCON sin necesidad.
+        // Las altas que esperan aprobación (modo "solo avisar") no cuentan: no hay nada que hacer hasta que se aprueben.
+        // La comprobación de quién sigue en la whitelist real se hace de paso, o con el botón "Sincronizar".
+        const ids = (this.db.prepare(`
+            SELECT DISTINCT e.server_id FROM whitelist_entries e LEFT JOIN whitelist_settings w ON w.server_id = e.server_id
+            WHERE e.status = 'pending_remove' OR (e.status = 'pending_add' AND NOT (e.awaiting = 1 AND coalesce(w.auto_add, 1) = 0))
+        `).all() as Array<{ server_id: number }>).map(r => r.server_id);
         for (const id of ids) await this.process(id).catch(err => logger.warn(`Whitelist de ${id}: ${(err as Error).message}`));
     }
 
