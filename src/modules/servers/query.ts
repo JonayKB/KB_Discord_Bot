@@ -95,6 +95,9 @@ interface SlpStatus {
     description?: unknown;
 }
 
+/** UUID con el que el servidor sustituye a los jugadores que no permiten aparecer en el listado. */
+const ANONYMOUS_UUID = '00000000-0000-0000-0000-000000000000';
+
 /** Tras recibir el estado, cuánto esperamos al pong antes de quedarnos con la latencia de la respuesta de estado. */
 const PONG_TIMEOUT = 1500;
 
@@ -248,7 +251,12 @@ async function queryMinecraft(t: QueryTarget): Promise<QueryResult> {
         players = q.value.players.list.map(name => ({ name }));
         complete = true;
     } else {
-        players = (s.players?.sample ?? []).map(p => ({ name: p.name, id: p.id }));
+        // Los jugadores con "Permitir listados de servidores" desactivado (y, en 1.20.1, cualquiera tras reaparecer:
+        // el servidor pierde esa opción al recrear el jugador) llegan como "Anonymous Player" con UUID nulo: no son
+        // un nombre real, así que se descartan y cuentan como ocultos.
+        players = (s.players?.sample ?? [])
+            .filter(p => p.id !== ANONYMOUS_UUID)
+            .map(p => ({ name: p.name, id: p.id }));
         complete = players.length >= (s.players?.online ?? 0);
     }
 
