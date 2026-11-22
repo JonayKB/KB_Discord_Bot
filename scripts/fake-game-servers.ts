@@ -57,7 +57,7 @@ export function startFakeMinecraft(port: number, state: FakeMcState): net.Server
                     // Status Request → respuesta JSON
                     const json = JSON.stringify({
                         version: { name: state.version, protocol: 767 },
-                        players: { online: state.online, max: state.max, sample: state.players.slice(0, 12).map((name, i) => ({ name, id: `00000000-0000-0000-0000-00000000000${i}` })) },
+                        players: { online: state.online, max: state.max, sample: state.players.slice(0, 12).map((name, i) => ({ name, id: `00000000-0000-0000-0000-00000000000${i + 1}` })) },
                         description: { text: state.motd },
                     });
                     const s = Buffer.from(json, 'utf8');
