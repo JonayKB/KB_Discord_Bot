@@ -94,6 +94,8 @@ export interface ActionInput {
     deleteDays?: number;
     /** Por defecto, lo que diga la configuración. */
     notify?: boolean;
+    /** Se llama justo antes de aplicarla en Discord, ya enviado el MD: su evento puede llegar antes que la respuesta. */
+    beforeApply?: () => void;
 }
 
 export interface Moderator { userId: string; username: string }
@@ -251,6 +253,7 @@ export class ModerationService {
         }
 
         this.markRecent(input.action, user.id);
+        input.beforeApply?.();
         try {
             switch (input.action) {
                 case 'timeout': await member!.timeout(input.durationMs!, auditReason); break;

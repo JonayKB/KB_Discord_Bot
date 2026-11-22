@@ -3,12 +3,13 @@ import { get, post, put, type EmbedData, type ModuleInfo, type Status, type Welc
 import { useLive } from '../live';
 import { Check, ChannelSelect, DiscordPreview, EmbedFields, Icon, PageHead, RoleChecklist, Spinner, Switch, VariableChips, errMsg, toast, useGuildData } from '../ui';
 
-type Kind = 'dm' | 'channel' | 'goodbye';
+type Kind = 'dm' | 'channel' | 'goodbye' | 'unverifiedKick';
 
 const SECTIONS: Array<{ kind: Kind; title: string; hint: string }> = [
     { kind: 'dm', title: 'Mensaje directo al entrar', hint: 'Le llega por MD a cada nuevo miembro (si tiene los MD abiertos).' },
     { kind: 'channel', title: 'Mensaje en un canal al entrar', hint: 'Se publica en el canal que elijas; usa {mention} para mencionarle.' },
     { kind: 'goodbye', title: 'Despedida al salir', hint: 'Se publica en un canal cuando alguien se va del servidor.' },
+    { kind: 'unverifiedKick', title: 'Despedida si se le expulsa por no verificarse', hint: 'Sustituye a la despedida normal, en su mismo canal. Si lo apagas, sale la normal.' },
 ];
 
 export default function Welcome() {
@@ -57,6 +58,7 @@ export default function Welcome() {
             <div className="stack">
                 {SECTIONS.map(sec => (
                     <MessageCard key={sec.kind} title={sec.title} hint={sec.hint} kind={sec.kind} msg={cfg[sec.kind]} channels={guild.channels}
+                        notice={sec.kind === 'unverifiedKick' && !cfg.goodbye.enabled ? 'La despedida está apagada: actívala y elige su canal para que se publique este mensaje.' : undefined}
                         botName={status?.bot?.tag ?? 'Bot'} botAvatar={status?.bot?.avatar} running={running}
                         onChange={patch => setMsg(sec.kind, patch)} onTest={() => test(sec.kind)} />
                 ))}
@@ -72,8 +74,8 @@ export default function Welcome() {
     );
 }
 
-function MessageCard({ title, hint, kind, msg, channels, botName, botAvatar, running, onChange, onTest }: {
-    title: string; hint: string; kind: Kind; msg: WelcomeMessage; channels: ReturnType<typeof useGuildData>['channels'];
+function MessageCard({ title, hint, notice, kind, msg, channels, botName, botAvatar, running, onChange, onTest }: {
+    title: string; hint: string; notice?: string; kind: Kind; msg: WelcomeMessage; channels: ReturnType<typeof useGuildData>['channels'];
     botName: string; botAvatar?: string | null; running: boolean;
     onChange: (patch: Partial<WelcomeMessage>) => void; onTest: () => void;
 }) {
@@ -101,10 +103,11 @@ function MessageCard({ title, hint, kind, msg, channels, botName, botAvatar, run
                 </div>
             </div>
 
+            {msg.enabled && notice && <div className="alert info">{notice}</div>}
             {msg.enabled && (
                 <div className="grid cols-2" style={{ alignItems: 'start' }}>
                     <div className="stack">
-                        {kind !== 'dm' && <label className="field">Canal<ChannelSelect value={msg.channelId ?? ''} channels={channels} onChange={channelId => onChange({ channelId: channelId || null })} /></label>}
+                        {(kind === 'channel' || kind === 'goodbye') && <label className="field">Canal<ChannelSelect value={msg.channelId ?? ''} channels={channels} onChange={channelId => onChange({ channelId: channelId || null })} /></label>}
                         <label className="field">Texto
                             <textarea ref={area} rows={3} maxLength={2000} value={content} onChange={e => setPayload({ content: e.target.value })} />
                         </label>

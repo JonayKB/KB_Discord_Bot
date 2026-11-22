@@ -15,6 +15,7 @@ Bot de Discord de MCKBServers, ahora **modular** y con un **panel web** para ges
 | `/setreaction`: un emoji → un rol, guardado en `config.json` | Módulo **Roles por reacción**: varios emojis y roles por mensaje, cada uno con su comportamiento (normal, permanente, quitar rol, invertido o pulsar), modo exclusivo (un solo rol a la vez), publicar mensajes nuevos o usar uno que ya existe, todo editable desde el panel |
 | Bienvenida por MD escrita en el código | Módulo **Bienvenida**: MD, mensaje en un canal y despedida editables desde el panel (con vista previa y botón de prueba), roles automáticos al entrar |
 | — | Módulo **Moderación**: canal de registro (mensajes borrados/editados, entradas, salidas, roles, apodos, silencios, baneos) y avisar / silenciar / expulsar / banear desde el panel con historial por usuario |
+| — | Módulo **Verificación**: avisa cada día a quien no se ha verificado y lo expulsa al acabar su plazo (3 días, o 10 si ya había confirmado), con roles, plazos, textos y motivos editables |
 | Solo el estado actual del servidor de juego | **Estadísticas** de cada servidor: gráficas de jugadores, TPS, MSPT, CPU, latencia y disponibilidad (1 h a 30 días) |
 | Whitelist a mano | **RCON** en cada servidor de Minecraft: consola desde el panel y whitelist automática a partir de una campaña de confirmación (un nombre por persona, sin repetidos, comprobado con Mojang, con cola si el servidor está apagado y sin tocar nunca los nombres añadidos a mano) |
 | — | Módulo **Tickets**: panel con botones (un tipo de ticket por botón, con formulario opcional) que crea un canal privado en una categoría con el staff; desde el panel se responden, se atienden, se cierran con o sin motivo y queda el historial con transcripción |
@@ -92,6 +93,7 @@ src/
     inbox/                 MD recibidos y respuestas
     scheduler/             tareas programadas
     confirmations/         campañas, formularios, confirmados, contador
+    verification/          avisos y expulsión de quien no se verifica
     servers/               servidores de juego: consulta (MC/Hytale), estado en el panel y mensaje en Discord
   web/                     servidor del panel (Express + WebSocket) y login con Discord
   commands/ events/ utils/ código anterior: bienvenida, /create_info_message, /setreaction
@@ -132,6 +134,7 @@ npm run smoke        # pruebas automáticas de los flujos principales con Discor
 ## Notas y cambios de comportamiento
 
 - **Módulo Mensajes desactivado = pausa global**: el bot no envía nada (ni programado ni confirmaciones) hasta reactivarlo.
+- **Verificación** (apagada hasta que la actives en su sección): se aplica a quien tiene *solo* el rol de sin verificar y a quien tiene sin verificar + confirmado sin el de verificado; con cualquier otra combinación no se toca a nadie. El plazo cuenta desde el primer aviso y empieza de nuevo si se activa otra vez, cambian los roles configurados, la persona cambia de grupo o vuelve a entrar, o pasan más de 48 h sin poder avisar. Se atiende a 10 personas cada 5 minutos. Con Mensajes en pausa no se expulsa a nadie. Al expulsar, Bienvenida publica su despedida específica (con el motivo) en lugar de la normal, en el mismo canal y solo si la despedida está activada. Una expulsión también quita de las whitelists con "quitar al salir del Discord".
 - **Envíos masivos**: 1 MD por segundo aprox. para respetar los rate limits; el progreso se ve en directo.
 - La bandeja solo lista conversaciones "reales" (alguien te escribió, o tú le escribiste/respondiste a un usuario); los MD automáticos y masivos quedan en el Historial.
 - El comando `/create_confirmation_message` ya no existe: el mensaje contador se crea desde **Confirmaciones**. `/setreaction` sigue funcionando (ahora con una opción `modo`) y lo que crea aparece en **Roles por reacción**.

@@ -58,6 +58,7 @@ async function main() {
     const { ModerationService, createModerationModule } = await import(src('modules/moderation'));
     const { TicketsService, createTicketsModule } = await import(src('modules/tickets'));
     const { NewsService, createNewsModule } = await import(src('modules/news'));
+    const { VerificationService, createVerificationModule } = await import(src('modules/verification'));
     const { startFakeMinecraft, startFakeSpark } = await import('./fake-game-servers');
     const { startWebServer } = await import(src('web/server'));
     const { migrateLegacy } = await import(src('core/migrateLegacy'));
@@ -96,7 +97,9 @@ async function main() {
     manager.register(createServersModule(servers, new WhitelistService(mock.client, db, servers, confirmations), mcStats));
     manager.register(createReactionsModule(reactions));
     manager.register(createWelcomeModule(new WelcomeService(mock.client, db, messages)));
-    manager.register(createModerationModule(new ModerationService(mock.client, db, messages)));
+    const moderation = new ModerationService(mock.client, db, messages);
+    manager.register(createModerationModule(moderation));
+    manager.register(createVerificationModule(new VerificationService(mock.client, db, messages, moderation)));
     const tickets = new TicketsService(mock.client, db, messages);
     manager.register(createTicketsModule(tickets));
     manager.register(createNewsModule(new NewsService(mock.client, db)));

@@ -13,6 +13,7 @@ import Confirmations from './pages/Confirmations';
 import Servers from './pages/Servers';
 import Reactions from './pages/Reactions';
 import Welcome from './pages/Welcome';
+import Verification from './pages/Verification';
 import Moderation from './pages/Moderation';
 import Tickets from './pages/Tickets';
 import News from './pages/News';
@@ -30,6 +31,7 @@ const NAV = [
     ['servers', 'Servidores', 'server'],
     ['reactions', 'Roles por reacción', 'smile'],
     ['welcome', 'Bienvenida', 'wave'],
+    ['verification', 'Verificación', 'check'],
     ['moderation', 'Moderación', 'shield'],
     ['tickets', 'Tickets', 'ticket'],
     ['news', 'Noticias', 'list'],
@@ -134,6 +136,7 @@ export default function App() {
                     {page === 'servers' && <Servers />}
                     {page === 'reactions' && <Reactions />}
                     {page === 'welcome' && <Welcome />}
+                    {page === 'verification' && <Verification />}
                     {page === 'moderation' && <Moderation />}
                     {page === 'tickets' && <Tickets sub={parts[1]} />}
                     {page === 'news' && <News />}

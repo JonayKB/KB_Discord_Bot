@@ -415,6 +415,19 @@ const MIGRATIONS: string[] = [
     ALTER TABLE whitelist_settings ADD COLUMN auto_add INTEGER NOT NULL DEFAULT 1;  -- 0 = solo avisar
     ALTER TABLE whitelist_entries ADD COLUMN awaiting INTEGER NOT NULL DEFAULT 0;    -- alta pendiente de aprobar
     `,
+    /* v13: avisos a quien no se verifica, antes de expulsarlo */ `
+    CREATE TABLE verification_warnings (
+        user_id    TEXT PRIMARY KEY,
+        group_name TEXT NOT NULL CHECK (group_name IN ('unverified','confirmed')),
+        joined_at  INTEGER,                      -- si vuelve a entrar, el plazo empieza de nuevo
+        days       INTEGER NOT NULL,             -- plazo que se le comunicó
+        warnings   INTEGER NOT NULL DEFAULT 0,
+        warned_at  INTEGER,
+        retry_at   INTEGER,                      -- tras un fallo: cuándo reintentar
+        delivery   TEXT,                         -- dm | channel | failed
+        error      TEXT
+    );
+    `,
 ];
 
 export function openDb(file = path.join(DATA_DIR, 'bot.db')): DB {

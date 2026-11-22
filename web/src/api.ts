@@ -266,7 +266,7 @@ export interface ServerHistory {
 
 export interface WelcomePayload { content?: string; embed?: EmbedData | null; fileIds?: string[] }
 export interface WelcomeMessage { enabled: boolean; channelId?: string | null; payload: WelcomePayload }
-export interface WelcomeConfig { dm: WelcomeMessage; channel: WelcomeMessage; goodbye: WelcomeMessage; autoRoleIds: string[]; ignoreBots: boolean }
+export interface WelcomeConfig { dm: WelcomeMessage; channel: WelcomeMessage; goodbye: WelcomeMessage; unverifiedKick: WelcomeMessage; autoRoleIds: string[]; ignoreBots: boolean }
 
 export type ModAction = 'warn' | 'note' | 'timeout' | 'untimeout' | 'kick' | 'ban' | 'unban';
 export type LogEvent = 'messageDelete' | 'messageEdit' | 'memberJoin' | 'memberLeave' | 'roles' | 'nicknames' | 'timeouts' | 'bans' | 'modActions';
@@ -276,6 +276,20 @@ export interface ModCase {
     moderatorId: string | null; moderatorName: string | null; source: 'panel' | 'discord'; dmStatus: 'sent' | 'failed' | null; createdAt: number;
 }
 export interface BanInfo { userId: string; username: string; avatar: string; reason: string | null }
+
+export type VerificationGroup = 'unverified' | 'confirmed';
+export interface VerificationConfig {
+    enabled: boolean; unverifiedRoleId: string | null; confirmedRoleId: string | null; verifiedRoleId: string | null;
+    rulesChannelId: string | null; fallbackChannelId: string | null;
+    groups: Record<VerificationGroup, { days: number; message: string; reason: string }>;
+}
+export interface VerificationStatus {
+    problem: string | null;
+    members: Array<{
+        userId: string; username: string; displayName: string; group: VerificationGroup; days: number; warnings: number;
+        delivery: 'dm' | 'channel' | 'failed' | null; error: string | null; kickAt: number | null;
+    }>;
+}
 
 export type TicketButtonStyle = 'primary' | 'secondary' | 'success' | 'danger';
 export interface TicketQuestion { label: string; placeholder: string; long: boolean; required: boolean }
