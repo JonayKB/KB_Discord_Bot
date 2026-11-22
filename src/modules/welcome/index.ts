@@ -8,7 +8,7 @@ export { WelcomeService } from './service';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-const KINDS: WelcomeKind[] = ['dm', 'channel', 'goodbye'];
+const KINDS: WelcomeKind[] = ['dm', 'channel', 'goodbye', 'unverifiedKick'];
 
 function parseChannelMessage(raw: any, field: string): WelcomeChannelMessage {
     return {
@@ -18,12 +18,16 @@ function parseChannelMessage(raw: any, field: string): WelcomeChannelMessage {
     };
 }
 
-function parseConfig(body: any): WelcomeConfig {
+function parseConfig(body: any, current: WelcomeConfig): WelcomeConfig {
     if (!body || typeof body !== 'object') throw new HttpError(400, 'Configuración no válida');
     return {
         dm: { enabled: bool(body.dm?.enabled), payload: parsePayload(body.dm?.payload) },
         channel: parseChannelMessage(body.channel, 'channel'),
         goodbye: parseChannelMessage(body.goodbye, 'goodbye'),
+        // Un panel abierto desde antes de actualizar no lo envía: se conserva el guardado.
+        unverifiedKick: body.unverifiedKick
+            ? { enabled: bool(body.unverifiedKick.enabled), payload: parsePayload(body.unverifiedKick.payload) }
+            : current.unverifiedKick,
         autoRoleIds: strArray(body.autoRoleIds, 'autoRoleIds', 20),
         ignoreBots: body.ignoreBots === undefined ? true : bool(body.ignoreBots),
     };
@@ -34,14 +38,14 @@ export function createWelcomeModule(service: WelcomeService): BotModule {
 
     router.get('/', (_req, res) => res.json(service.getConfig()));
 
-    router.put('/', (req, res) => res.json(service.setConfig(parseConfig(req.body))));
+    router.put('/', (req, res) => res.json(service.setConfig(parseConfig(req.body, service.getConfig()))));
 
     /** Prueba con la configuración que se está editando (sin guardarla). */
     router.post('/test', asyncRoute(async (req, res) => {
         const kind = req.body?.kind as WelcomeKind;
         if (!KINDS.includes(kind)) throw new HttpError(400, 'Tipo de mensaje no válido');
-        const cfg = parseConfig(req.body?.config);
-        if (kind !== 'dm' && !cfg[kind].channelId) throw new HttpError(400, 'Elige primero un canal.');
+        const cfg = parseConfig(req.body?.config, service.getConfig());
+        if (kind !== 'dm' && !cfg[kind === 'unverifiedKick' ? 'goodbye' : kind].channelId) throw new HttpError(400, 'Elige primero un canal.');
         res.json(await service.test(kind, cfg, req.session!.userId));
     }));
 

@@ -6,6 +6,7 @@ import { env } from '../../core/config';
 import { HttpError, parseJson } from '../../core/http';
 import { Logger } from '../../utils/Logger';
 import type { MessageRecord, MessagesService, OutgoingPayload } from '../messages/service';
+import type { VerificationService } from '../verification/service';
 
 const logger = new Logger('Welcome');
 const KEY = 'welcome.config';
@@ -26,13 +27,15 @@ export interface WelcomeConfig {
     channel: WelcomeChannelMessage;
     /** Mensaje en un canal cuando alguien se va. */
     goodbye: WelcomeChannelMessage;
+    /** Sustituye a la despedida, en su mismo canal, si se le expulsa por no verificarse. */
+    unverifiedKick: WelcomeMessage;
     /** Roles que se dan automáticamente al entrar. */
     autoRoleIds: string[];
     /** No dar la bienvenida ni roles a otros bots. */
     ignoreBots: boolean;
 }
 
-export type WelcomeKind = 'dm' | 'channel' | 'goodbye';
+export type WelcomeKind = 'dm' | 'channel' | 'goodbye' | 'unverifiedKick';
 
 /** Lo que había antes escrito en el código (events/guild/memberAdd.ts): se mantiene como valor por defecto. */
 export const DEFAULT_CONFIG: WelcomeConfig = {
@@ -65,6 +68,14 @@ export const DEFAULT_CONFIG: WelcomeConfig = {
         channelId: null,
         payload: { content: '👋 **{username}** ha salido del servidor. Ahora somos {count}.', embed: null, fileIds: [] },
     },
+    unverifiedKick: {
+        enabled: true,
+        payload: {
+            content: '👢 **{username}** ha sido expulsado de **{server}** por no verificarse ni aceptar las normas dentro del plazo. Ahora somos {count}.',
+            embed: null,
+            fileIds: [],
+        },
+    },
     autoRoleIds: [],
     ignoreBots: true,
 };
@@ -75,7 +86,8 @@ export class WelcomeService {
     constructor(
         private readonly client: Client,
         private readonly db: DB,
-        private readonly messages: MessagesService
+        private readonly messages: MessagesService,
+        private readonly verification?: Pick<VerificationService, 'takeKick'>
     ) {}
 
     getConfig(): WelcomeConfig {
@@ -84,6 +96,7 @@ export class WelcomeService {
             dm: { ...DEFAULT_CONFIG.dm, ...saved.dm },
             channel: { ...DEFAULT_CONFIG.channel, ...saved.channel },
             goodbye: { ...DEFAULT_CONFIG.goodbye, ...saved.goodbye },
+            unverifiedKick: { ...DEFAULT_CONFIG.unverifiedKick, ...saved.unverifiedKick },
             autoRoleIds: saved.autoRoleIds ?? DEFAULT_CONFIG.autoRoleIds,
             ignoreBots: saved.ignoreBots ?? DEFAULT_CONFIG.ignoreBots,
         };
@@ -119,17 +132,19 @@ export class WelcomeService {
 
     async onLeave(member: GuildMember | PartialGuildMember): Promise<void> {
         if (!this.active) return;
+        const unverified = this.verification?.takeKick(member.id) ?? false;
         const cfg = this.getConfig();
         if (cfg.ignoreBots && member.user?.bot) return;
-        logger.info(`⬅️ Miembro salió: ${member.user?.username ?? member.id}`);
-        if (cfg.goodbye.enabled) await this.send('goodbye', cfg, member as GuildMember).catch(err => logger.warn(`Despedida: ${(err as Error).message}`));
+        logger.info(`⬅️ Miembro salió${unverified ? ' (expulsado por no verificarse)' : ''}: ${member.user?.username ?? member.id}`);
+        const kind = unverified && cfg.unverifiedKick.enabled ? 'unverifiedKick' : 'goodbye';
+        if (cfg.goodbye.enabled) await this.send(kind, cfg, member as GuildMember).catch(err => logger.warn(`Despedida: ${(err as Error).message}`));
     }
 
     private send(kind: WelcomeKind, cfg: WelcomeConfig, member: GuildMember): Promise<MessageRecord> {
         if (kind === 'dm') return this.messages.sendToUser(member.id, cfg.dm.payload, { source: 'welcome' });
-        const msg = cfg[kind];
-        if (!msg.channelId) throw new HttpError(400, 'Falta el canal.');
-        return this.messages.sendToChannel(msg.channelId, msg.payload, { source: 'welcome', sourceRef: kind }, { about: { user: member.user, member } });
+        const channelId = cfg[kind === 'unverifiedKick' ? 'goodbye' : kind].channelId;
+        if (!channelId) throw new HttpError(400, 'Falta el canal.');
+        return this.messages.sendToChannel(channelId, cfg[kind].payload, { source: 'welcome', sourceRef: kind }, { about: { user: member.user, member } });
     }
 
     /**

@@ -26,6 +26,7 @@ import { WelcomeService, createWelcomeModule } from "./modules/welcome";
 import { ModerationService, createModerationModule } from "./modules/moderation";
 import { TicketsService, createTicketsModule } from "./modules/tickets";
 import { NewsService, createNewsModule } from "./modules/news";
+import { VerificationService, createVerificationModule } from "./modules/verification";
 
 startLogCapture();
 const logger = new Logger("Index");
@@ -74,8 +75,9 @@ const servers = new ServersService(client, db, confirmations);
 const whitelist = new WhitelistService(client, db, servers, confirmations);
 const mcStats = new McStatsService(client, db);
 const reactions = new ReactionRolesService(client, db);
-const welcome = new WelcomeService(client, db, messages);
 const moderation = new ModerationService(client, db, messages);
+const verification = new VerificationService(client, db, messages, moderation);
+const welcome = new WelcomeService(client, db, messages, verification);
 const tickets = new TicketsService(client, db, messages);
 const news = new NewsService(client, db);
 setServices({ messages, confirmations, servers, mcStats, reactions });
@@ -90,6 +92,7 @@ manager.register(createWelcomeModule(welcome));
 manager.register(createModerationModule(moderation));
 manager.register(createTicketsModule(tickets));
 manager.register(createNewsModule(news));
+manager.register(createVerificationModule(verification));
 
 // ───────────── Código "clásico" (comandos) ─────────────
 loadCommands(client);
