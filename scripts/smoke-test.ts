@@ -102,7 +102,7 @@ async function main() {
     const welcome = new WelcomeService(client, db, messages);
     const moderation = new ModerationService(client, db, messages);
     const tickets = new TicketsService(client, db, messages);
-    setServices({ messages, confirmations, servers: gameServers, mcStats, reactions });
+    setServices({ messages, confirmations, servers: gameServers, mcStats, reactions, moderation });
     manager.register(createMessagesModule(messages, db));
     manager.register(createInboxModule(inbox, messages, db));
     manager.register(createSchedulerModule(scheduler));
@@ -966,6 +966,119 @@ async function main() {
     assert.equal((await call('POST', '/api/moderation/actions', { action: 'warn', userId: '20000000000000002', reason: 'x' })).status, 409);
     await call('POST', '/api/modules/moderation/enabled', { enabled: true });
     ok('borrar un caso y desactivar el módulo en caliente');
+
+    {
+        console.log('\nModeración compartida con Minecraft (kb_moderation)');
+        const MC = '/api/integrations/minecraft/moderation';
+        const key = (await call('POST', `/api/servers/${mcId}/stats/key`)).json.key;
+        const mc = (method: string, p: string, body?: unknown, k: string | null = key) => fetch(base + MC + p, {
+            method,
+            headers: { 'content-type': 'application/json', ...(k ? { authorization: `Bearer ${k}` } : {}) },
+            body: body === undefined ? undefined : JSON.stringify(body),
+        }).then(async r => ({ status: r.status, json: await r.json().catch(() => null) }));
+        const STAFF_MC = { discordId: null, name: 'StaffMC' };
+
+        assert.equal((await mc('GET', '/feed', undefined, null)).status, 401, 'sin key no');
+        assert.equal((await mc('GET', '/feed', undefined, 'kbs_nope')).status, 401);
+        const first = await mc('GET', '/feed?after=0');
+        assert.equal(first.status, 200);
+        const existing = (await call('GET', '/api/moderation/cases?limit=500')).json.length;
+        assert.equal(first.json.events.filter((e: any) => e.kind === 'case').length, existing, 'los casos que ya había también se comparten');
+        let cursor = first.json.cursor;
+        ok('feed con la API key del servidor, con el historial anterior');
+
+        const PLAYER = '20000000000000003';
+        const player = mock.addMember(PLAYER, 'griefer_dc');
+        const banBody = { ref: 'mc-1', action: 'ban', userId: PLAYER, mcName: 'Griefer', reason: 'Griefeo', expiresAt: Date.now() + 60, moderator: STAFF_MC };
+        const b1 = await mc('POST', '/actions', banBody);
+        assert.equal(b1.status, 200);
+        assert.ok(b1.json.caseId);
+        assert.ok(mock.bans.has(PLAYER), 'el baneo del juego se aplica en Discord');
+        assert.deepEqual((await mc('POST', '/actions', banBody)).json, b1.json, 'un reintento no lo duplica');
+        client.emit('guildBanAdd', { user: player.user, reason: 'x' });
+        await sleep(50);
+        const banCases = (await call('GET', `/api/moderation/cases?userId=${PLAYER}`)).json;
+        assert.equal(banCases.length, 1, 'ni el evento de Discord');
+        assert.equal(banCases[0].source, 'minecraft');
+        assert.equal(banCases[0].mcName, 'Griefer');
+        assert.ok(banCases[0].expiresAt);
+        const own = await mc('GET', `/feed?after=${cursor}`);
+        assert.equal(own.json.events.length, 0, 'al servidor que lo hizo no se le devuelve');
+        cursor = own.json.cursor;
+        ok('baneo temporal desde el juego: se aplica en Discord, idempotente, sin eco');
+
+        await sleep(100);
+        assert.equal(await moderation.liftExpiredBans(), 1);
+        assert.ok(!mock.bans.has(PLAYER), 'al vencer, se levanta en Discord');
+        assert.equal(await moderation.liftExpiredBans(), 0, 'solo una vez');
+        ok('el bot levanta los baneos temporales del juego al vencer');
+
+        mock.addMember(PLAYER, 'griefer_dc');
+        const w = await call('POST', '/api/moderation/actions', { action: 'warn', userId: PLAYER, reason: 'Aviso desde el panel' });
+        const feed = await mc('GET', `/feed?after=${cursor}`);
+        const kinds = feed.json.events.map((e: any) => `${e.kind}:${e.case?.action}`);
+        assert.deepEqual(kinds, ['case:warn'], 'el aviso del panel llega al juego; el fin del baneo temporal no vuelve al servidor que lo puso');
+        assert.equal(feed.json.events[0].case.userId, PLAYER);
+        cursor = feed.json.cursor;
+        await call('DELETE', `/api/moderation/cases/${w.json.id}`);
+        const delFeed = await mc('GET', `/feed?after=${cursor}`);
+        assert.deepEqual(delFeed.json.events.map((e: any) => [e.kind, e.caseId]), [['delete', w.json.id]]);
+        cursor = delFeed.json.cursor;
+        const other = mock.addMember('20000000000000004', 'otro_griefer_dc');
+        client.emit('guildBanAdd', { user: other.user, reason: 'Ban a mano' });
+        await sleep(50);
+        const manualBan = (await mc('GET', `/feed?after=${cursor}`)).json;
+        assert.equal(manualBan.events[0].case.action, 'ban', 'un baneo hecho a mano en Discord también llega');
+        assert.equal(manualBan.events[0].case.source, 'discord');
+        cursor = manualBan.cursor;
+        ok('panel y Discord → juego: casos nuevos, borrados y baneos a mano');
+
+        mock.bans.delete(PLAYER);
+        mock.addMember(PLAYER, 'griefer_dc');
+        await mc('POST', '/actions', { ref: 'mc-2', action: 'timeout', userId: PLAYER, mcName: 'Griefer', reason: 'Spam', durationMs: 0, moderator: STAFF_MC });
+        assert.ok(mock.modLog.includes(`timeout:${PLAYER}:${28 * 24 * 3600_000}`), 'silencio permanente del juego → 28 días en Discord');
+        await mc('POST', '/actions', { ref: 'mc-3', action: 'kick', userId: PLAYER, mcName: 'Griefer', reason: 'AFK', moderator: STAFF_MC });
+        const note = (await call('GET', `/api/moderation/cases?userId=${PLAYER}&action=note`)).json[0];
+        assert.equal(note.reason, 'Expulsado de Minecraft: AFK');
+        assert.ok(members.has(PLAYER), 'expulsar del juego no lo echa de Discord');
+        const wg = await mc('POST', '/actions', { ref: 'mc-4', action: 'warn', userId: PLAYER, mcName: 'Griefer', reason: 'Insultos', moderator: STAFF_MC });
+        assert.ok(sent.some((m: any) => m.to === PLAYER && /aviso/.test(m.opts.embeds?.[0]?.data?.title ?? '')), 'el aviso del juego también llega por MD');
+        await mc('POST', '/actions', { ref: 'mc-5', action: 'delete', userId: PLAYER, caseId: wg.json.caseId, reason: '', moderator: STAFF_MC });
+        assert.equal((await call('GET', `/api/moderation/cases?userId=${PLAYER}&action=warn`)).json.length, 0, 'aviso quitado en el juego → borrado en el bot');
+        assert.equal((await mc('GET', `/feed?after=${cursor}`)).json.events.length, 0, 'nada de esto vuelve al juego');
+        assert.equal((await mc('POST', '/actions', { ref: 'x', action: 'nuke', userId: PLAYER })).status, 400);
+        assert.equal((await mc('POST', '/actions', { ref: 'x', action: 'warn', userId: 'abc' })).status, 400);
+        ok('silencio, expulsión (como nota), aviso con MD y aviso retirado desde el juego');
+
+        const REPORTER = '20000000000000002';
+        const rep = { ref: 'r1', reporterName: 'Alex', reporterDiscordId: REPORTER, targetName: 'Griefer', targetDiscordId: PLAYER, reason: 'Hacks: vuela', location: 'overworld 1 2 3' };
+        const r1 = await mc('POST', '/reports', rep);
+        assert.equal(r1.status, 200);
+        assert.equal((await mc('POST', '/reports', rep)).json.id, r1.json.id, 'reintento sin duplicar');
+        await sleep(50);
+        assert.match(lastLog()?.title ?? '', /Reporte del juego/);
+        const openList = (await call('GET', '/api/moderation/reports?open=1')).json;
+        assert.equal(openList.length, 1);
+        assert.equal(openList[0].targetName, 'Griefer');
+        assert.equal(openList[0].dmStatus, 'sent');
+        assert.ok(sent.some((m: any) => m.to === REPORTER && /Hemos recibido tu reporte/.test(m.opts.embeds?.[0]?.data?.title ?? '')), 'MD de "recibido" a quien reporta');
+        assert.ok(!sent.some((m: any) => m.to === PLAYER && /reporte/i.test(m.opts.embeds?.[0]?.data?.title ?? '')), 'al reportado no se le dice nada');
+        const conv = (await call('GET', `/api/inbox/conversations/${REPORTER}`)).json;
+        assert.ok(conv.some((m: any) => /Hemos recibido tu reporte/.test(m.embed?.title ?? '')), 'queda en la conversación de la bandeja');
+        assert.equal((await call('POST', `/api/inbox/conversations/${REPORTER}/reply`, { content: '¿Tienes captura?' })).status, 200, 'el staff le contesta por MD');
+        await call('POST', `/api/moderation/reports/${r1.json.id}/close`);
+        await sleep(50);
+        assert.ok(sent.some((m: any) => m.to === REPORTER && /se ha cerrado/.test(m.opts.embeds?.[0]?.data?.title ?? '')), 'y otro al cerrarlo');
+        const closed = (await mc('GET', `/feed?after=${cursor}`)).json;
+        assert.deepEqual(closed.events.map((e: any) => [e.kind, e.reportRef]), [['report_closed', 'r1']], 'cerrar en el panel lo cierra en el juego');
+        cursor = closed.cursor;
+        const r2 = await mc('POST', '/reports', { ...rep, ref: 'r2' });
+        await mc('POST', '/reports/close', { ref: 'r2', by: 'StaffMC' });
+        assert.equal((await call('GET', '/api/moderation/reports?open=1')).json.length, 0, 'cerrado en el juego → cerrado en el panel');
+        assert.equal((await call('GET', '/api/moderation/reports?open=0')).json.find((r: any) => r.id === r2.json.id).closedBy, 'StaffMC');
+        assert.equal((await mc('GET', `/feed?after=${cursor}`)).json.events.length, 0, 'sin eco');
+        ok('reportes del juego: MD a quien reporta, conversación, panel, registro y cerrados a la par');
+    }
 
     console.log('\nTickets');
     /** Simula pulsar un botón (o enviar un formulario si se pasa `modal`) en Discord. */

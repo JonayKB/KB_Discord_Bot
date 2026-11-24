@@ -269,11 +269,18 @@ export interface WelcomeMessage { enabled: boolean; channelId?: string | null; p
 export interface WelcomeConfig { dm: WelcomeMessage; channel: WelcomeMessage; goodbye: WelcomeMessage; unverifiedKick: WelcomeMessage; autoRoleIds: string[]; ignoreBots: boolean }
 
 export type ModAction = 'warn' | 'note' | 'timeout' | 'untimeout' | 'kick' | 'ban' | 'unban';
-export type LogEvent = 'messageDelete' | 'messageEdit' | 'memberJoin' | 'memberLeave' | 'roles' | 'nicknames' | 'timeouts' | 'bans' | 'modActions';
+export type LogEvent = 'messageDelete' | 'messageEdit' | 'memberJoin' | 'memberLeave' | 'roles' | 'nicknames' | 'timeouts' | 'bans' | 'modActions' | 'reports';
 export interface ModerationConfig { logChannelId: string | null; log: Record<LogEvent, boolean>; ignoreChannelIds: string[]; dmOnAction: boolean }
 export interface ModCase {
     id: number; userId: string; userTag: string | null; action: ModAction; reason: string | null; durationMs: number | null;
-    moderatorId: string | null; moderatorName: string | null; source: 'panel' | 'discord'; dmStatus: 'sent' | 'failed' | null; createdAt: number;
+    moderatorId: string | null; moderatorName: string | null; source: 'panel' | 'discord' | 'minecraft'; dmStatus: 'sent' | 'failed' | null; createdAt: number;
+    /** Casos del juego: cuenta de Minecraft y fin del baneo temporal. */
+    mcName: string | null; expiresAt: number | null; originServerId: number | null;
+}
+export interface McReport {
+    id: number; serverId: number; ref: string; reporterName: string; reporterDiscordId: string | null; targetName: string;
+    targetDiscordId: string | null; reason: string; location: string | null; createdAt: number; closedAt: number | null; closedBy: string | null;
+    dmStatus: 'sent' | 'failed' | null;
 }
 export interface BanInfo { userId: string; username: string; avatar: string; reason: string | null }
 

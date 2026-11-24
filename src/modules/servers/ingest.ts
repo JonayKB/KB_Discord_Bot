@@ -36,6 +36,33 @@ function warnAuth(req: Request, reason: string): void {
 const RATE_LIMIT = 30;
 
 /**
+ * Servidor de Minecraft al que pertenece la API key de la petición (Authorization: Bearer <key>).
+ * La usan las estadísticas y la moderación (mod kb_moderation). Lanza 401/403 si no vale.
+ */
+export function authorizeServerKey(db: DB, service: McStatsService, req: Request): number {
+    const header = req.get('authorization');
+    const m = /^Bearer\s+(\S+)$/i.exec(header ?? '');
+    if (!m) {
+        const reason = header ? 'la cabecera Authorization no tiene el formato "Bearer <key>"' : 'falta la cabecera Authorization';
+        warnAuth(req, reason);
+        throw new HttpError(401, `API key no válida: ${reason}`);
+    }
+    const serverId = service.serverForKey(m[1]);
+    if (!serverId) {
+        const reason = `ningún servidor tiene la key ${describeKey(m[1])}; ¿se regeneró o es de otro panel?`;
+        warnAuth(req, reason);
+        throw new HttpError(401, `API key no válida: ${reason}`);
+    }
+    const server = db.prepare('SELECT name, type FROM game_servers WHERE id = ?').get(serverId) as { name: string; type: string } | undefined;
+    if (!server || server.type !== 'minecraft') {
+        const reason = `la key es del servidor #${serverId}${server ? ` ("${server.name}", ${server.type})` : ''}, que no es de Minecraft`;
+        warnAuth(req, reason);
+        throw new HttpError(403, `API key no válida: ${reason}`);
+    }
+    return serverId;
+}
+
+/**
  * POST /api/integrations/minecraft/stats — lo llama el mod kb_discord_auth.
  * Fuera de la sesión del panel: solo acepta la API key del servidor (Authorization: Bearer).
  */
@@ -47,29 +74,10 @@ export function createStatsIngestRouter(db: DB, getService: () => McStatsService
         const service = getService();
         if (!service) throw new HttpError(503, 'El módulo "Servidores de juego" está desactivado');
 
-        const header = req.get('authorization');
-        const m = /^Bearer\s+(\S+)$/i.exec(header ?? '');
-        if (!m) {
-            const reason = header ? 'la cabecera Authorization no tiene el formato "Bearer <key>"' : 'falta la cabecera Authorization';
-            warnAuth(req, reason);
-            throw new HttpError(401, `API key no válida: ${reason}`);
-        }
-        const serverId = service.serverForKey(m[1]);
-        if (!serverId) {
-            const reason = `ningún servidor tiene la key ${describeKey(m[1])}; ¿se regeneró o es de otro panel?`;
-            warnAuth(req, reason);
-            throw new HttpError(401, `API key no válida: ${reason}`);
-        }
-
-        const server = db.prepare('SELECT name, type FROM game_servers WHERE id = ?').get(serverId) as { name: string; type: string } | undefined;
-        if (!server || server.type !== 'minecraft') {
-            const reason = `la key es del servidor #${serverId}${server ? ` ("${server.name}", ${server.type})` : ''}, que no es de Minecraft`;
-            warnAuth(req, reason);
-            throw new HttpError(403, `API key no válida: ${reason}`);
-        }
+        const serverId = authorizeServerKey(db, service, req);
 
         const now = Date.now();
-        const id = crypto.createHash('sha256').update(m![1]).digest('hex');
+        const id = crypto.createHash('sha256').update(req.get('authorization') ?? '').digest('hex');
         for (const [k, v] of windows) if (now - v.start >= 60_000) windows.delete(k);
         const w = windows.get(id);
         if (!w) windows.set(id, { start: now, count: 1 });

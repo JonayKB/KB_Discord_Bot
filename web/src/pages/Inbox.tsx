@@ -167,7 +167,7 @@ export default function Inbox({ userId }: { userId?: string }) {
     );
 }
 
-function Bubble({ m }: { m: Msg }) {
+export function Bubble({ m }: { m: Msg }) {
     const out = m.direction === 'out';
     const auto = out && !['manual', 'reply'].includes(m.source);
     return (

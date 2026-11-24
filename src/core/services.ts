@@ -3,6 +3,7 @@ import type { MessagesService } from '../modules/messages/service';
 import type { ServersService } from '../modules/servers/service';
 import type { McStatsService } from '../modules/servers/stats';
 import type { ReactionRolesService } from '../modules/reactions/service';
+import type { ModerationService } from '../modules/moderation/service';
 
 /**
  * Acceso global a los servicios para el código "legacy" (eventos, comandos y utilidades que
@@ -14,6 +15,7 @@ export interface Services {
     servers: ServersService;
     mcStats: McStatsService;
     reactions: ReactionRolesService;
+    moderation: ModerationService;
 }
 
 let current: Services | null = null;

@@ -6,6 +6,7 @@
  * No toca tu base de datos real: usa una carpeta temporal.
  */
 import { ChannelType } from 'discord.js';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -70,6 +71,8 @@ async function main() {
     const mock = createMockDiscord('G1');
     for (const [id, name] of people) mock.addMember(id, name);
     mock.addMember('999', 'okuser', ['R_OK']);
+    // Con un ID como los de Discord (17+ dígitos): el panel solo sanciona IDs reales. Sirve para probar kb_moderation.
+    mock.addMember('300000000000000001', 'griefer_mc');
     mock.mkUser('ADMIN', 'admin');
     const ok = mock.addRole('R_OK', 'Confirmado MC', '#3ba55d');
     for (const id of ['100', '101', '103', '105', '999']) ok.members.set(id, mock.members.get(id) ?? mock.members.get('999'));
@@ -89,7 +92,8 @@ async function main() {
     const servers = new ServersService(mock.client, db, confirmations);
     const reactions = new ReactionRolesService(mock.client, db);
     const mcStats = new McStatsService(mock.client, db);
-    setServices({ messages, confirmations, servers, mcStats, reactions });
+    const moderation = new ModerationService(mock.client, db, messages);
+    setServices({ messages, confirmations, servers, mcStats, reactions, moderation });
     manager.register(createMessagesModule(messages, db));
     manager.register(createInboxModule(inbox, messages, db));
     manager.register(createSchedulerModule(scheduler));
@@ -97,7 +101,6 @@ async function main() {
     manager.register(createServersModule(servers, new WhitelistService(mock.client, db, servers, confirmations), mcStats));
     manager.register(createReactionsModule(reactions));
     manager.register(createWelcomeModule(new WelcomeService(mock.client, db, messages)));
-    const moderation = new ModerationService(mock.client, db, messages);
     manager.register(createModerationModule(moderation));
     manager.register(createVerificationModule(new VerificationService(mock.client, db, messages, moderation)));
     const tickets = new TicketsService(mock.client, db, messages);
@@ -114,7 +117,12 @@ async function main() {
     await manager.startEnabled();
 
     // Estadísticas de jugadores de ejemplo (como si las enviara el mod kb_discord_auth).
-    mcStats.generateKey(1);
+    // Key del servidor Minecraft de ejemplo; DEMO_MC_KEY fija una conocida para probar el mod contra la demo.
+    const demoKey = mcStats.generateKey(1);
+    if (process.env.DEMO_MC_KEY) {
+        db.prepare('UPDATE mc_stats_keys SET key_hash = ? WHERE server_id = 1').run(crypto.createHash('sha256').update(process.env.DEMO_MC_KEY).digest('hex'));
+    }
+    console.log(`  API key del servidor "MCKB Survival": ${process.env.DEMO_MC_KEY ?? demoKey}`);
     const demoPlayers: Array<[string, string | null]> = [['Steve_MC', '100'], ['AlexG', '101'], ['LunaCraft', '103'], ['ZoeMC', '105'], ['Herobrine', null], ['Pepe_*', null]];
     const statsOf = (i: number, f: number) => ({
         playTimeSeconds: Math.round((40 - i * 5) * 3600 * f), deaths: Math.round((12 + i * 3) * f), mobKills: Math.round((900 - i * 120) * f),
