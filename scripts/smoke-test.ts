@@ -987,6 +987,21 @@ async function main() {
         let cursor = first.json.cursor;
         ok('feed con la API key del servidor, con el historial anterior');
 
+        // WebSocket: avisa de que hay algo nuevo en el feed (el mod lo lee entonces), solo con la key del servidor.
+        const wsUrl = `ws://127.0.0.1:${PORT}${MC}/ws`;
+        const refused = await new Promise<number>(resolve => {
+            const bad = new WebSocket(wsUrl, { headers: { authorization: 'Bearer kbs_nope' } });
+            bad.on('unexpected-response', (_req, res) => resolve(res.statusCode ?? 0));
+            bad.on('open', () => resolve(101));
+            bad.on('error', () => undefined);
+        });
+        assert.equal(refused, 401, 'el WebSocket sin una key válida no');
+        const mcSocket = new WebSocket(wsUrl, { headers: { authorization: `Bearer ${key}` } });
+        const nudges: string[] = [];
+        mcSocket.on('message', d => nudges.push(String(d)));
+        await new Promise((resolve, reject) => { mcSocket.once('open', resolve); mcSocket.once('error', reject); });
+        ok('WebSocket de moderación con la API key del servidor');
+
         const PLAYER = '20000000000000003';
         const player = mock.addMember(PLAYER, 'griefer_dc');
         const banBody = { ref: 'mc-1', action: 'ban', userId: PLAYER, mcName: 'Griefer', reason: 'Griefeo', expiresAt: Date.now() + 60, moderator: STAFF_MC };
@@ -1006,6 +1021,10 @@ async function main() {
         assert.equal(own.json.events.length, 0, 'al servidor que lo hizo no se le devuelve');
         cursor = own.json.cursor;
         ok('baneo temporal desde el juego: se aplica en Discord, idempotente, sin eco');
+
+        assert.ok(nudges.includes('{"type":"feed"}'), 'un caso nuevo avisa por el WebSocket');
+        mcSocket.close();
+        ok('el WebSocket avisa en cuanto hay algo nuevo en el feed');
 
         await sleep(100);
         assert.equal(await moderation.liftExpiredBans(), 1);

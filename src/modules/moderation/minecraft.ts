@@ -1,4 +1,8 @@
+import type http from 'node:http';
+import type { Duplex } from 'node:stream';
 import express, { Router, type NextFunction, type Request, type Response } from 'express';
+import { WebSocketServer, type WebSocket } from 'ws';
+import { bus, type BusEvent } from '../../core/bus';
 import type { DB } from '../../core/db';
 import { HttpError, int, str } from '../../core/http';
 import { Logger } from '../../utils/Logger';
@@ -11,9 +15,12 @@ const logger = new Logger('McModeration');
 /** Ruta pública (autenticada con la API key del servidor) que usa el mod kb_moderation. */
 export const MC_MODERATION_PATH = '/api/integrations/minecraft/moderation';
 
+/** WebSocket de los servidores: avisa en cuanto hay algo nuevo en el feed, así el mod no tiene que preguntar cada pocos segundos. */
+export const MC_MODERATION_WS_PATH = `${MC_MODERATION_PATH}/ws`;
+
 /** IDs de Discord: solo dígitos (los reales tienen 17-20; los de la demo y las pruebas son más cortos). */
 const SNOWFLAKE = /^\d{1,25}$/;
-/** Peticiones por minuto y servidor: el mod consulta el feed cada pocos segundos. */
+/** Peticiones por minuto y servidor (sin el WebSocket, el mod consulta el feed cada pocos segundos). */
 const RATE_LIMIT = 240;
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -22,6 +29,7 @@ const RATE_LIMIT = 240;
  * Sanciones y reportes compartidos con los servidores de Minecraft:
  *  - POST /actions  una sanción hecha en el juego (se aplica en Discord y queda como caso)
  *  - GET  /feed     lo que ha pasado en el bot desde `after` (casos nuevos y borrados, reportes cerrados)
+ *  - WS   /ws       avisa ({"type":"feed"}) cada vez que hay algo nuevo en el feed; el mod lo lee entonces
  *  - POST /reports  un /report del juego · POST /reports/close  cerrado en el juego
  */
 export function createMcModerationRouter(
@@ -116,4 +124,68 @@ export function createMcModerationRouter(
     });
 
     return router;
+}
+
+/**
+ * WebSocket de los servidores de Minecraft (GET /ws con "Authorization: Bearer <key>").
+ * No lleva datos: solo dice "hay algo nuevo" y el mod lo lee con GET /feed desde su cursor. Así el feed sigue siendo
+ * la única fuente (y lo que pase con el socket caído se recupera al reconectar, que el mod lee el feed al conectar).
+ * Devuelve el manejador del evento 'upgrade' para esa ruta.
+ */
+export function createMcModerationSocket(
+    db: DB,
+    getStats: () => McStatsService | null,
+    getModeration: () => ModerationService | null,
+): (req: http.IncomingMessage, socket: Duplex, head: Buffer) => void {
+    const wss = new WebSocketServer({ noServer: true });
+    const alive = new WeakSet<WebSocket>();
+
+    wss.on('connection', ws => {
+        alive.add(ws);
+        ws.on('pong', () => alive.add(ws));
+        ws.on('error', () => undefined);
+    });
+
+    // Todo lo que añade un evento al feed (casos nuevos o borrados, reportes cerrados) publica uno de estos.
+    bus.on('event', (e: BusEvent) => {
+        if (e.type !== 'moderation:cases' && e.type !== 'moderation:reports') return;
+        for (const ws of wss.clients) if (ws.readyState === ws.OPEN) ws.send('{"type":"feed"}');
+    });
+
+    // Ping cada 30 s: aquí corta los sockets muertos y el mod sabe que el suyo sigue vivo.
+    setInterval(() => {
+        for (const ws of wss.clients) {
+            if (!alive.has(ws)) { ws.terminate(); continue; }
+            alive.delete(ws);
+            ws.ping();
+        }
+    }, 30_000).unref();
+
+    const refuse = (socket: Duplex, status: number, message: string) => {
+        const body = JSON.stringify({ error: message });
+        socket.end(`HTTP/1.1 ${status} ${status === 401 ? 'Unauthorized' : status === 403 ? 'Forbidden' : 'Service Unavailable'}\r\n`
+            + `Content-Type: application/json\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`);
+    };
+
+    return (req, socket, head) => {
+        const stats = getStats();
+        if (!stats) return refuse(socket, 503, 'El módulo "Servidores de juego" está desactivado');
+        if (!getModeration()) return refuse(socket, 503, 'El módulo "Moderación" está desactivado');
+        // authorizeServerKey lee la cabecera y la IP como en una petición de Express.
+        const header = (name: string) => {
+            const v = req.headers[name.toLowerCase()];
+            return Array.isArray(v) ? v[0] : v;
+        };
+        let serverId: number;
+        try {
+            serverId = authorizeServerKey(db, stats, { get: header, ip: req.socket.remoteAddress } as unknown as Request);
+        } catch (err) {
+            return refuse(socket, err instanceof HttpError ? err.status : 401, (err as Error).message);
+        }
+        wss.handleUpgrade(req, socket, head, ws => {
+            logger.info(`Servidor de Minecraft #${serverId} conectado al WebSocket de moderación`);
+            ws.on('close', () => logger.info(`Servidor de Minecraft #${serverId} desconectado del WebSocket de moderación`));
+            wss.emit('connection', ws, req);
+        });
+    };
 }

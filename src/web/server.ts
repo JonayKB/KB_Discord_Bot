@@ -17,7 +17,7 @@ import { getServices } from '../core/services';
 import { createStatsIngestRouter } from '../modules/servers/ingest';
 import { createLauncherRouter } from '../modules/servers/launcher';
 import { INGEST_PATH } from '../modules/servers/stats';
-import { MC_MODERATION_PATH, createMcModerationRouter } from '../modules/moderation/minecraft';
+import { MC_MODERATION_PATH, MC_MODERATION_WS_PATH, createMcModerationRouter, createMcModerationSocket } from '../modules/moderation/minecraft';
 import type { ModuleManager } from '../core/module';
 import { Logger, type LogLevel } from '../utils/Logger';
 import { STAFF_EVENTS, getStaffRoleIds, requireStaffRoute, resolveAccess, setStaffRoleIds, type PanelAccess } from './access';
@@ -264,6 +264,9 @@ export function startWebServer({ client, db, manager }: WebDeps): http.Server {
     const wss = new WebSocketServer({ noServer: true });
 
     const sockets = new WeakMap<WebSocket, { userId: string; access: PanelAccess }>();
+    const mcSocket = createMcModerationSocket(db,
+        () => (manager.isRunning('servers') ? getServices().mcStats : null),
+        () => (manager.isRunning('moderation') ? getServices().moderation : null));
 
     server.on('upgrade', async (req, socket, head) => {
         if (!isWebSocket(req)) {
@@ -273,6 +276,8 @@ export function startWebServer({ client, db, manager }: WebDeps): http.Server {
             return;
         }
         const url = new URL(req.url ?? '/', 'http://localhost');
+        // Los servidores de Minecraft (mod kb_moderation): con su API key, no con la sesión del panel.
+        if (url.pathname === MC_MODERATION_WS_PATH) return mcSocket(req, socket, head);
         const origin = req.headers.origin;
         const sameOrigin = !origin || (() => { try { return new URL(origin).host === req.headers.host; } catch { return false; } })();
         const session = url.pathname === '/ws' && sameOrigin ? sessionFromRequest(db, req) : undefined;
