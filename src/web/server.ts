@@ -17,6 +17,7 @@ import { getServices } from '../core/services';
 import { createStatsIngestRouter } from '../modules/servers/ingest';
 import { createLauncherRouter } from '../modules/servers/launcher';
 import { INGEST_PATH } from '../modules/servers/stats';
+import { MC_MODERATION_PATH, createMcModerationRouter } from '../modules/moderation/minecraft';
 import type { ModuleManager } from '../core/module';
 import { Logger, type LogLevel } from '../utils/Logger';
 import { STAFF_EVENTS, getStaffRoleIds, requireStaffRoute, resolveAccess, setStaffRoleIds, type PanelAccess } from './access';
@@ -64,6 +65,11 @@ export function startWebServer({ client, db, manager }: WebDeps): http.Server {
 
     // ── Público: estadísticas que envía el mod de Minecraft (autenticado con su API key, sin sesión) ──
     app.use(INGEST_PATH, createStatsIngestRouter(db, () => (manager.isRunning('servers') ? getServices().mcStats : null)));
+
+    // ── Público: sanciones y reportes compartidos con los servidores de Minecraft (mod kb_moderation, con su API key) ──
+    app.use(MC_MODERATION_PATH, createMcModerationRouter(db,
+        () => (manager.isRunning('servers') ? getServices().mcStats : null),
+        () => (manager.isRunning('moderation') ? getServices().moderation : null)));
 
     // ── API (requiere sesión) ──
     const api = Router();

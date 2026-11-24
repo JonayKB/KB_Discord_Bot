@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from 'react';
-import { del, get, post, put, type BanInfo, type LogEvent, type Member, type ModAction, type ModCase, type ModerationConfig, type ModuleInfo } from '../api';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Bubble } from './Inbox';
+import { del, get, post, put, type BanInfo, type LogEvent, type McReport, type Member, type ModAction, type ModCase, type ModerationConfig, type ModuleInfo, type Msg } from '../api';
 import { useIsOwner } from '../access';
 import { fmtDateTime, fmtDuration, fmtRelative } from '../format';
 import { useLive } from '../live';
-import { Avatar, Check, ChannelSelect, Empty, Icon, PageHead, Spinner, UserPicker, errMsg, rememberMember, toast, useConfirm, useGuildData, useMemberLabel } from '../ui';
+import { Avatar, Check, ChannelSelect, Empty, Icon, Modal, PageHead, Spinner, UserPicker, errMsg, rememberMember, toast, useConfirm, useGuildData, useMemberLabel } from '../ui';
 
 const ACTION_LABEL: Record<ModAction, string> = {
     warn: 'Aviso', note: 'Nota', timeout: 'Silencio', untimeout: 'Quitar silencio', kick: 'Expulsión', ban: 'Baneo', unban: 'Desbaneo',
@@ -24,10 +25,11 @@ const DURATIONS: Array<[number, string]> = [[5, '5 min'], [10, '10 min'], [60, '
 
 const LOG_LABEL: Record<LogEvent, string> = {
     messageDelete: 'Mensajes borrados', messageEdit: 'Mensajes editados', memberJoin: 'Entradas al servidor', memberLeave: 'Salidas del servidor',
-    roles: 'Cambios de roles', nicknames: 'Cambios de apodo', timeouts: 'Silencios hechos en Discord', bans: 'Baneos hechos en Discord', modActions: 'Acciones del panel',
+    roles: 'Cambios de roles', nicknames: 'Cambios de apodo', timeouts: 'Silencios hechos en Discord', bans: 'Baneos hechos en Discord', modActions: 'Acciones del panel y del juego',
+    reports: 'Reportes del juego (/report)',
 };
 
-type Tab = 'act' | 'history' | 'bans' | 'log';
+type Tab = 'act' | 'history' | 'reports' | 'bans' | 'log';
 
 export default function Moderation() {
     const owner = useIsOwner();
@@ -47,13 +49,14 @@ export default function Moderation() {
             {!running && <div className="alert" style={{ marginBottom: 16 }}>El módulo <b>Moderación</b> está desactivado: no se registra nada ni se pueden aplicar sanciones. Actívalo en <a href="#/modules">Módulos</a>.</div>}
 
             <div className="seg" style={{ marginBottom: 16 }} role="tablist">
-                {([['act', 'Sancionar'], ['history', 'Historial'], ['bans', 'Baneados'], ...(owner ? [['log', 'Registro']] : [])] as Array<[Tab, string]>).map(([id, l]) => (
+                {([['act', 'Sancionar'], ['history', 'Historial'], ['reports', 'Reportes del juego'], ['bans', 'Baneados'], ...(owner ? [['log', 'Registro']] : [])] as Array<[Tab, string]>).map(([id, l]) => (
                     <button key={id} type="button" role="tab" aria-selected={tab === id} className={tab === id ? 'on' : ''} onClick={() => setTab(id)}>{l}</button>
                 ))}
             </div>
 
             {tab === 'act' && <ActTab running={running} userId={userId} setUserId={setUserId} />}
             {tab === 'history' && <HistoryTab onOpenUser={openUser} />}
+            {tab === 'reports' && <ReportsTab running={running} onOpenUser={openUser} />}
             {tab === 'bans' && <BansTab running={running} onOpenUser={openUser} />}
             {tab === 'log' && <LogTab running={running} />}
         </div>
@@ -199,12 +202,17 @@ function CaseList({ cases, showUser, onChanged, onOpenUser }: { cases: ModCase[]
                             <td>
                                 <span className={`badge ${ACTION_BADGE[c.action]}`}>{ACTION_LABEL[c.action]}</span>
                                 {c.durationMs && <div className="muted small">{fmtDuration(c.durationMs)}</div>}
+                                {c.expiresAt && <div className="muted small" title={fmtDateTime(c.expiresAt)}>hasta {fmtDateTime(c.expiresAt)}</div>}
+                                {c.mcName && <div className="muted small" title="Cuenta de Minecraft">⛏ {c.mcName}</div>}
                             </td>
                             <td className="small" style={{ maxWidth: 320 }}>
                                 {c.reason ?? <span className="muted">—</span>}
                                 {c.dmStatus === 'failed' && <div className="small" style={{ color: 'var(--warn)' }}>No se le pudo avisar por MD</div>}
                             </td>
-                            <td className="small">{c.source === 'discord' ? <span className="muted" title="Se hizo directamente en Discord">En Discord</span> : c.moderatorName}</td>
+                            <td className="small">
+                                {c.source === 'discord' ? <span className="muted" title="Se hizo directamente en Discord">En Discord</span> : c.moderatorName}
+                                {c.source === 'minecraft' && <div><span className="badge" title="Se hizo en el servidor de Minecraft">Minecraft</span></div>}
+                            </td>
                             <td className="small muted" title={fmtDateTime(c.createdAt)}>{fmtRelative(c.createdAt)}</td>
                             <td>{owner && <button className="btn sm ghost icon" onClick={() => remove(c)} aria-label={`Borrar caso ${c.id}`}><Icon name="trash" size={14} /></button>}</td>
                         </tr>
@@ -237,6 +245,126 @@ function HistoryTab({ onOpenUser }: { onOpenUser: (id: string) => void }) {
             </div>
             {!cases ? <Spinner /> : <CaseList cases={cases} showUser onChanged={load} onOpenUser={onOpenUser} />}
         </div>
+    );
+}
+
+// ───────────────────────────── Reportes del juego ─────────────────────────────
+
+function ReportsTab({ running, onOpenUser }: { running: boolean; onOpenUser: (id: string) => void }) {
+    const [open, setOpen] = useState(true);
+    const [reports, setReports] = useState<McReport[] | null>(null);
+    const [chat, setChat] = useState<McReport | null>(null);
+    const load = useCallback(() => {
+        get<McReport[]>(`/moderation/reports?open=${open ? 1 : 0}&limit=200`).then(setReports).catch(e => { toast.error(errMsg(e)); setReports([]); });
+    }, [open]);
+    useEffect(load, [load]);
+    useLive(e => { if (e.type === 'moderation:reports') load(); });
+
+    const close = async (r: McReport) => {
+        try { await post(`/moderation/reports/${r.id}/close`, {}); toast.ok(`Reporte #${r.id} cerrado (también en el juego)`); load(); } catch (e) { toast.error(errMsg(e)); }
+    };
+
+    return (
+        <div className="card stack">
+            <div className="row between wrap">
+                <div><h2>Reportes del juego</h2><div className="hint">Lo que los jugadores envían con <code>/report</code> en el servidor de Minecraft. Al cerrarlo aquí se cierra también en el juego.</div></div>
+                <div className="seg" role="tablist">
+                    <button type="button" className={open ? 'on' : ''} onClick={() => setOpen(true)}>Abiertos</button>
+                    <button type="button" className={!open ? 'on' : ''} onClick={() => setOpen(false)}>Cerrados</button>
+                </div>
+            </div>
+            {!reports ? <Spinner /> : reports.length === 0 ? <Empty title={open ? 'No hay reportes abiertos' : 'No hay reportes cerrados'}>{open ? 'Todo en orden.' : ''}</Empty> : (
+                <div className="table-wrap">
+                    <table>
+                        <thead><tr><th>#</th><th>Reportado</th><th>Motivo</th><th>Por</th><th>Fecha</th><th /></tr></thead>
+                        <tbody>
+                            {reports.map(r => (
+                                <tr key={r.id}>
+                                    <td className="muted small">{r.id}</td>
+                                    <td>
+                                        {r.targetDiscordId
+                                            ? <button className="btn ghost sm" title="Ver su historial y sancionar" onClick={() => onOpenUser(r.targetDiscordId!)}><b>{r.targetName}</b> <UserName id={r.targetDiscordId} /></button>
+                                            : <b>{r.targetName}</b>}
+                                        {!r.targetDiscordId && <div className="muted small">Sin Discord vinculado</div>}
+                                    </td>
+                                    <td className="small" style={{ maxWidth: 340 }}>
+                                        {r.reason}
+                                        {r.location && <div className="muted small">📍 {r.location}</div>}
+                                    </td>
+                                    <td className="small">
+                                        {r.reporterName}
+                                        {r.reporterDiscordId && <div className="muted small"><UserName id={r.reporterDiscordId} /></div>}
+                                        {r.dmStatus === 'failed' && <div className="small" style={{ color: 'var(--warn)' }}>No se le pudo escribir por MD</div>}
+                                    </td>
+                                    <td className="small muted" title={fmtDateTime(r.createdAt)}>
+                                        {fmtRelative(r.createdAt)}
+                                        {r.closedAt && <div>Cerrado por {r.closedBy ?? '—'}</div>}
+                                    </td>
+                                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                                        {r.reporterDiscordId
+                                            ? <button className="btn sm ghost" title="Hablar por MD con quien hizo el reporte" onClick={() => setChat(r)}><Icon name="inbox" size={14} /> Conversación</button>
+                                            : <span className="muted small" title="Quien reportó no tiene Discord vinculado">Sin MD</span>}
+                                        {' '}{!r.closedAt && <button className="btn sm" disabled={!running} onClick={() => close(r)}>Cerrar</button>}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            )}
+            {chat && <ReportChat report={chat} onClose={() => setChat(null)} />}
+        </div>
+    );
+}
+
+/** Conversación por MD con quien hizo un reporte: la misma que en la bandeja, sin salir de la moderación. */
+function ReportChat({ report, onClose }: { report: McReport; onClose: () => void }) {
+    const userId = report.reporterDiscordId!;
+    const [thread, setThread] = useState<Msg[] | null>(null);
+    const [text, setText] = useState('');
+    const [sending, setSending] = useState(false);
+    const bottom = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        get<Msg[]>(`/inbox/conversations/${userId}`).then(m => { setThread(m); post(`/inbox/conversations/${userId}/read`).catch(() => undefined); })
+            .catch(e => { toast.error(errMsg(e)); setThread([]); });
+    }, [userId]);
+    useEffect(() => { bottom.current?.scrollIntoView({ block: 'end' }); }, [thread]);
+    useLive(e => {
+        if (e.type !== 'message:new') return;
+        const m = e.data as Msg;
+        if (m.kind !== 'dm' || m.userId !== userId) return;
+        setThread(t => (t ?? []).some(x => x.id === m.id) ? t : [...(t ?? []), m]);
+        if (m.direction === 'in') post(`/inbox/conversations/${userId}/read`).catch(() => undefined);
+    });
+
+    const send = async () => {
+        if (!text.trim()) return;
+        setSending(true);
+        try {
+            const m = await post<Msg>(`/inbox/conversations/${userId}/reply`, { content: text.trim() });
+            setThread(t => (t ?? []).some(x => x.id === m.id) ? t : [...(t ?? []), m]);
+            setText('');
+        } catch (e) { toast.error(errMsg(e)); }
+        finally { setSending(false); }
+    };
+
+    return (
+        <Modal title={`Reporte #${report.id} · conversación con ${report.reporterName}`} onClose={onClose} wide footer={
+            <div className="row" style={{ width: '100%', gap: 8 }}>
+                <input style={{ flex: 1 }} value={text} maxLength={2000} placeholder={`Escribe a ${report.reporterName} por MD…`}
+                    onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(); } }} />
+                <button className="btn primary" disabled={sending || !text.trim()} onClick={send}>{sending ? 'Enviando…' : 'Enviar'}</button>
+            </div>
+        }>
+            <div className="small muted" style={{ marginBottom: 8 }}>
+                Sobre <b>{report.targetName}</b>: {report.reason}. Lo que contestes le llega por MD; sus respuestas aparecen aquí y en la Bandeja.
+            </div>
+            <div className="thread" style={{ maxHeight: 380, overflowY: 'auto' }}>
+                {!thread ? <Spinner /> : thread.length === 0 ? <Empty title="Aún no hay mensajes" /> : thread.map(m => <Bubble key={m.id} m={m} />)}
+                <div ref={bottom} />
+            </div>
+        </Modal>
     );
 }
 

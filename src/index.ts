@@ -80,7 +80,7 @@ const verification = new VerificationService(client, db, messages, moderation);
 const welcome = new WelcomeService(client, db, messages, verification);
 const tickets = new TicketsService(client, db, messages);
 const news = new NewsService(client, db);
-setServices({ messages, confirmations, servers, mcStats, reactions });
+setServices({ messages, confirmations, servers, mcStats, reactions, moderation });
 
 manager.register(createMessagesModule(messages, db));
 manager.register(createInboxModule(inbox, messages, db));

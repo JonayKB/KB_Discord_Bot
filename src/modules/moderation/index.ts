@@ -49,6 +49,15 @@ export function createModerationModule(service: ModerationService): BotModule {
 
     router.get('/bans', asyncRoute(async (_req, res) => res.json(await service.bans())));
 
+    // Reportes de los servidores de Minecraft (/report en el juego).
+    router.get('/reports', (req, res) => {
+        const open = req.query.open === undefined ? undefined : req.query.open === '1' || req.query.open === 'true';
+        res.json(service.reports({ open, limit: req.query.limit ? int(req.query.limit, 'limit', { min: 1, max: 500 }) : 100 }));
+    });
+    router.post('/reports/:id/close', (req, res) => {
+        res.json(service.closeReport(int(req.params.id, 'id', { min: 1 }), req.session!.username));
+    });
+
     router.post('/actions', asyncRoute(async (req, res) => {
         const b = req.body ?? {};
         const action = b.action as ModAction;
@@ -80,7 +89,9 @@ export function createModerationModule(service: ModerationService): BotModule {
             ctx.listen('guildMemberUpdate', (a, b) => service.onMemberUpdate(a, b));
             ctx.listen('guildBanAdd', ban => service.onBan(ban, true));
             ctx.listen('guildBanRemove', ban => service.onBan(ban, false));
-            ctx.onStop(() => { service.active = false; });
+            // Baneos temporales hechos en el juego: se levantan en Discord al vencer.
+            const expiry = setInterval(() => void service.liftExpiredBans().catch(() => undefined), 60_000);
+            ctx.onStop(() => { service.active = false; clearInterval(expiry); });
         },
     };
 }

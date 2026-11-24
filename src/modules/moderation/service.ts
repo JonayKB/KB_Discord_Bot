@@ -22,7 +22,7 @@ const KEY = 'moderation.config';
 export const ACTIONS = ['warn', 'note', 'timeout', 'untimeout', 'kick', 'ban', 'unban'] as const;
 export type ModAction = typeof ACTIONS[number];
 
-export const LOG_EVENTS = ['messageDelete', 'messageEdit', 'memberJoin', 'memberLeave', 'roles', 'nicknames', 'timeouts', 'bans', 'modActions'] as const;
+export const LOG_EVENTS = ['messageDelete', 'messageEdit', 'memberJoin', 'memberLeave', 'roles', 'nicknames', 'timeouts', 'bans', 'modActions', 'reports'] as const;
 export type LogEvent = typeof LOG_EVENTS[number];
 
 export interface ModerationConfig {
@@ -37,10 +37,12 @@ export interface ModerationConfig {
 
 const DEFAULT_CONFIG: ModerationConfig = {
     logChannelId: null,
-    log: { messageDelete: true, messageEdit: true, memberJoin: true, memberLeave: true, roles: true, nicknames: true, timeouts: true, bans: true, modActions: true },
+    log: { messageDelete: true, messageEdit: true, memberJoin: true, memberLeave: true, roles: true, nicknames: true, timeouts: true, bans: true, modActions: true, reports: true },
     ignoreChannelIds: [],
     dmOnAction: true,
 };
+
+export type CaseSource = 'panel' | 'discord' | 'minecraft';
 
 interface CaseRow {
     id: number;
@@ -51,9 +53,14 @@ interface CaseRow {
     duration_ms: number | null;
     moderator_id: string | null;
     moderator_name: string | null;
-    source: 'panel' | 'discord';
+    source: CaseSource;
     dm_status: 'sent' | 'failed' | null;
     created_at: number;
+    mc_name: string | null;
+    expires_at: number | null;
+    lifted_at: number | null;
+    origin_server_id: number | null;
+    origin_ref: string | null;
 }
 
 export interface ModCase {
@@ -65,10 +72,20 @@ export interface ModCase {
     durationMs: number | null;
     moderatorId: string | null;
     moderatorName: string | null;
-    source: 'panel' | 'discord';
+    source: CaseSource;
     dmStatus: 'sent' | 'failed' | null;
     createdAt: number;
+    /** Casos del juego: cuenta de Minecraft sancionada. */
+    mcName: string | null;
+    /** Baneo temporal hecho en el juego: cuándo se levanta (null = permanente o no aplica). */
+    expiresAt: number | null;
+    /** Servidor de Minecraft donde se hizo (source = 'minecraft'). */
+    originServerId: number | null;
 }
+
+/** Campos opcionales al crear un caso. */
+type NewCase = Omit<ModCase, 'id' | 'createdAt' | 'mcName' | 'expiresAt' | 'originServerId'>
+    & Partial<Pick<ModCase, 'mcName' | 'expiresAt' | 'originServerId'>> & { originRef?: string | null };
 
 const toCase = (r: CaseRow): ModCase => ({
     id: r.id,
@@ -82,6 +99,9 @@ const toCase = (r: CaseRow): ModCase => ({
     source: r.source,
     dmStatus: r.dm_status,
     createdAt: r.created_at,
+    mcName: r.mc_name,
+    expiresAt: r.expires_at,
+    originServerId: r.origin_server_id,
 });
 
 export interface ActionInput {
@@ -99,6 +119,70 @@ export interface ActionInput {
 }
 
 export interface Moderator { userId: string; username: string }
+
+/** Lo que manda un servidor de Minecraft (mod kb_moderation) al sancionar en el juego. */
+export const MC_ACTIONS = ['warn', 'note', 'timeout', 'untimeout', 'kick', 'ban', 'unban', 'delete'] as const;
+export type McAction = typeof MC_ACTIONS[number];
+
+export interface McActionInput {
+    /** Id de la sanción en el servidor: si se reintenta, no se duplica. */
+    ref: string;
+    action: McAction;
+    /** Cuenta de Discord vinculada al jugador sancionado. */
+    userId: string;
+    mcName: string | null;
+    reason: string;
+    /** timeout: duración (0 = permanente en el juego; en Discord se queda en el máximo, 28 días). */
+    durationMs?: number;
+    /** ban temporal: cuándo levantarlo (null = permanente). */
+    expiresAt?: number | null;
+    /** delete: caso del bot que se retira (un aviso o una nota quitados en el juego). */
+    caseId?: number;
+    moderator: { discordId: string | null; name: string };
+}
+
+/** Un cambio para los servidores de Minecraft: un caso nuevo, un caso borrado o un reporte cerrado. */
+export interface SyncEvent {
+    id: number;
+    kind: 'case' | 'delete' | 'report_closed';
+    /** case / delete */
+    caseId?: number;
+    case?: ModCase | null;
+    /** report_closed: el reporte en el servidor que lo creó y quién lo cerró */
+    reportRef?: string;
+    closedBy?: string | null;
+}
+
+export interface McReport {
+    id: number;
+    serverId: number;
+    ref: string;
+    reporterName: string;
+    reporterDiscordId: string | null;
+    targetName: string;
+    targetDiscordId: string | null;
+    reason: string;
+    location: string | null;
+    createdAt: number;
+    closedAt: number | null;
+    closedBy: string | null;
+    /** MD de "hemos recibido tu reporte" a quien lo hizo: así puede seguir hablando con el staff por MD. */
+    dmStatus: 'sent' | 'failed' | null;
+}
+
+interface ReportRow {
+    id: number; server_id: number; ref: string; reporter_name: string; reporter_discord_id: string | null; target_name: string;
+    target_discord_id: string | null; reason: string; location: string | null; created_at: number; closed_at: number | null; closed_by: string | null;
+    dm_status: 'sent' | 'failed' | null;
+}
+
+const toReport = (r: ReportRow): McReport => ({
+    id: r.id, serverId: r.server_id, ref: r.ref, reporterName: r.reporter_name, reporterDiscordId: r.reporter_discord_id,
+    targetName: r.target_name, targetDiscordId: r.target_discord_id, reason: r.reason, location: r.location,
+    createdAt: r.created_at, closedAt: r.closed_at, closedBy: r.closed_by, dmStatus: r.dm_status,
+});
+
+const MC_LABEL: Partial<Record<McAction, string>> = { kick: 'Expulsado de Minecraft' };
 
 const LABEL: Record<ModAction, string> = {
     warn: 'Aviso', note: 'Nota', timeout: 'Silencio', untimeout: 'Fin del silencio', kick: 'Expulsión', ban: 'Baneo', unban: 'Desbaneo',
@@ -177,19 +261,31 @@ export class ModerationService {
         return Object.fromEntries(rows.map(r => [r.action, r.n]));
     }
 
-    deleteCase(id: number): void {
-        const res = this.db.prepare('DELETE FROM mod_cases WHERE id = ?').run(id);
-        if (!res.changes) throw new HttpError(404, 'Caso no encontrado');
+    deleteCase(id: number, originServerId: number | null = null): void {
+        this.db.transaction(() => {
+            const res = this.db.prepare('DELETE FROM mod_cases WHERE id = ?').run(id);
+            if (!res.changes) throw new HttpError(404, 'Caso no encontrado');
+            this.db.prepare("INSERT INTO mod_sync_events (kind, target_id, origin_server_id, created_at) VALUES ('delete', ?, ?, ?)")
+                .run(id, originServerId, Date.now());
+        })();
         publish('moderation:cases', { id });
     }
 
-    private addCase(c: Omit<ModCase, 'id' | 'createdAt'>): ModCase {
-        const res = this.db.prepare(`
-            INSERT INTO mod_cases (user_id, user_tag, action, reason, duration_ms, moderator_id, moderator_name, source, dm_status, created_at)
-            VALUES (@userId, @userTag, @action, @reason, @durationMs, @moderatorId, @moderatorName, @source, @dmStatus, @createdAt)
-        `).run({ ...c, createdAt: Date.now() });
-        const row = this.db.prepare('SELECT * FROM mod_cases WHERE id = ?').get(res.lastInsertRowid) as CaseRow;
-        const out = toCase(row);
+    private addCase(c: NewCase): ModCase {
+        const out = this.db.transaction(() => {
+            const res = this.db.prepare(`
+                INSERT INTO mod_cases (user_id, user_tag, action, reason, duration_ms, moderator_id, moderator_name, source, dm_status, created_at,
+                                       mc_name, expires_at, origin_server_id, origin_ref)
+                VALUES (@userId, @userTag, @action, @reason, @durationMs, @moderatorId, @moderatorName, @source, @dmStatus, @createdAt,
+                        @mcName, @expiresAt, @originServerId, @originRef)
+            `).run({ mcName: null, expiresAt: null, originServerId: null, originRef: null, ...c, createdAt: Date.now() });
+            // Los servidores de Minecraft lo leen de aquí (menos el que lo creó, que ya lo tiene).
+            this.db.prepare("INSERT INTO mod_sync_events (kind, target_id, origin_server_id, created_at) VALUES ('case', ?, ?, ?)")
+                .run(res.lastInsertRowid, c.originServerId ?? null, Date.now());
+            return toCase(this.db.prepare('SELECT * FROM mod_cases WHERE id = ?').get(res.lastInsertRowid) as CaseRow);
+        })();
+        // Un desbaneo, venga de donde venga, cierra los baneos temporales pendientes de ese usuario.
+        if (out.action === 'unban') this.db.prepare('UPDATE mod_cases SET lifted_at = ? WHERE user_id = ? AND action = \'ban\' AND expires_at IS NOT NULL AND lifted_at IS NULL').run(Date.now(), out.userId);
         publish('moderation:cases', out);
         return out;
     }
@@ -282,6 +378,238 @@ export class ModerationService {
         return [...list.values()].map(b => ({ userId: b.user.id, username: b.user.username, avatar: b.user.displayAvatarURL({ size: 64 }), reason: b.reason ?? null }));
     }
 
+    // ────────────────────────── Minecraft (mod kb_moderation) ──────────────────────────
+
+    /**
+     * Una sanción hecha en un servidor de Minecraft: se aplica en Discord lo que se pueda (sin que un fallo
+     * impida registrarla, porque en el juego ya está hecha) y se guarda como caso. Idempotente por `ref`.
+     */
+    async fromMinecraft(serverId: number, input: McActionInput): Promise<{ caseId: number | null }> {
+        const existing = this.db.prepare('SELECT id FROM mod_cases WHERE origin_server_id = ? AND origin_ref = ?').get(serverId, input.ref) as { id: number } | undefined;
+        if (existing) return { caseId: existing.id };
+
+        if (input.action === 'delete') {
+            if (input.caseId && this.db.prepare('SELECT 1 FROM mod_cases WHERE id = ?').get(input.caseId)) this.deleteCase(input.caseId, serverId);
+            return { caseId: null };
+        }
+
+        const guild = this.guild();
+        const reason = input.reason.trim();
+        const auditReason = `${reason || LABEL[input.action as ModAction] || input.action} · por ${input.moderator.name} (Minecraft)`.slice(0, 500);
+        const member = await guild.members.fetch(input.userId).catch(() => null);
+        const user = member?.user ?? await this.client.users.fetch(input.userId).catch(() => null);
+        const tag = user?.username ?? null;
+        let dmStatus: ModCase['dmStatus'] = null;
+        const notify = this.getConfig().dmOnAction;
+        const timeoutMs = input.action === 'timeout' ? Math.min(input.durationMs && input.durationMs > 0 ? input.durationMs : MAX_TIMEOUT_MS, MAX_TIMEOUT_MS) : 0;
+
+        const discord = async (what: string, fn: () => Promise<unknown>) => {
+            try {
+                await fn();
+            } catch (err) {
+                logger.warn(`Minecraft → Discord: no se pudo ${what} a ${tag ?? input.userId}: ${(err as Error).message}`);
+            }
+        };
+
+        const dmTitle = DM_TEXT[input.action as ModAction];
+        if (notify && dmTitle && member) {
+            const lines = [`**Motivo:** ${reason || 'Sin motivo'}`];
+            if (input.action === 'timeout') lines.push(`**Duración:** ${input.durationMs ? fmtDuration(input.durationMs) : 'permanente en el juego'}`);
+            if (input.action === 'ban' && input.expiresAt) lines.push(`**Hasta:** <t:${Math.floor(input.expiresAt / 1000)}:f>`);
+            if (input.mcName) lines.push(`**Cuenta de Minecraft:** ${input.mcName}`);
+            try {
+                const r = await this.messages.sendToUser(input.userId, {
+                    embed: { title: dmTitle, description: lines.join('\n'), color: `#${COLOR[input.action as ModAction].toString(16).padStart(6, '0')}`, timestamp: true },
+                }, { source: 'system', sourceRef: `mod:mc:${input.action}` });
+                dmStatus = r.status === 'sent' ? 'sent' : 'failed';
+            } catch {
+                dmStatus = 'failed';
+            }
+        }
+
+        switch (input.action) {
+            case 'timeout':
+                if (member?.moderatable) {
+                    this.markRecent('timeout', input.userId);
+                    await discord('silenciar', () => member.timeout(timeoutMs, auditReason));
+                }
+                break;
+            case 'untimeout':
+                if (member?.moderatable && member.communicationDisabledUntilTimestamp && member.communicationDisabledUntilTimestamp > Date.now()) {
+                    this.markRecent('untimeout', input.userId);
+                    await discord('quitar el silencio', () => member.timeout(null, auditReason));
+                }
+                break;
+            case 'ban':
+                if (!member || member.bannable) {
+                    this.markRecent('ban', input.userId);
+                    await discord('banear', () => guild.bans.create(input.userId, { reason: auditReason }));
+                }
+                break;
+            case 'unban':
+                if (await guild.bans.fetch(input.userId).catch(() => null)) {
+                    this.markRecent('unban', input.userId);
+                    await discord('desbanear', () => guild.bans.remove(input.userId, auditReason));
+                }
+                break;
+            default:
+                break; // warn, note y kick (del juego) no cambian nada en Discord
+        }
+
+        // La expulsión del juego no echa de Discord: queda como nota en el historial.
+        const action: ModAction = input.action === 'kick' ? 'note' : input.action as ModAction;
+        const label = MC_LABEL[input.action];
+        const c = this.addCase({
+            userId: input.userId, userTag: tag, action,
+            reason: label ? `${label}${reason ? `: ${reason}` : ''}` : (reason || null),
+            durationMs: input.action === 'timeout' ? (input.durationMs || null) : null,
+            moderatorId: input.moderator.discordId, moderatorName: input.moderator.name, source: 'minecraft', dmStatus,
+            mcName: input.mcName, expiresAt: input.action === 'ban' ? (input.expiresAt ?? null) : null,
+            originServerId: serverId, originRef: input.ref,
+        });
+        logger.info(`🛡️ ${LABEL[action]} a ${tag ?? input.userId}${input.mcName ? ` (${input.mcName})` : ''} desde Minecraft por ${input.moderator.name}${reason ? `: ${reason}` : ''}`);
+        if (this.getConfig().log.modActions) void this.postCase(c);
+        return { caseId: c.id };
+    }
+
+    /** Cambios después de `after` para un servidor de Minecraft (sin los que creó él). */
+    feed(serverId: number, after: number, limit = 200): { events: SyncEvent[]; cursor: number } {
+        const rows = this.db.prepare('SELECT * FROM mod_sync_events WHERE id > ? ORDER BY id LIMIT ?').all(after, limit) as Array<{
+            id: number; kind: SyncEvent['kind']; target_id: number; origin_server_id: number | null;
+        }>;
+        const getCase = this.db.prepare('SELECT * FROM mod_cases WHERE id = ?');
+        const getReport = this.db.prepare('SELECT * FROM mc_reports WHERE id = ?');
+        const events: SyncEvent[] = [];
+        for (const r of rows) {
+            if (r.origin_server_id === serverId) continue;
+            if (r.kind === 'report_closed') {
+                // Solo al servidor donde se hizo el reporte: los reportes son de cada servidor.
+                const rep = getReport.get(r.target_id) as ReportRow | undefined;
+                if (rep && rep.server_id === serverId) events.push({ id: r.id, kind: r.kind, reportRef: rep.ref, closedBy: rep.closed_by });
+                continue;
+            }
+            const row = r.kind === 'case' ? getCase.get(r.target_id) as CaseRow | undefined : undefined;
+            if (r.kind === 'case' && !row) continue; // se borró después: llegará su evento 'delete'
+            events.push({ id: r.id, kind: r.kind, caseId: r.target_id, case: row ? toCase(row) : null });
+        }
+        return { events, cursor: rows.length ? rows[rows.length - 1].id : after };
+    }
+
+    /** Levanta en Discord los baneos temporales hechos en el juego que ya han vencido. */
+    async liftExpiredBans(now = Date.now()): Promise<number> {
+        const due = this.db.prepare("SELECT * FROM mod_cases WHERE action = 'ban' AND expires_at IS NOT NULL AND expires_at <= ? AND lifted_at IS NULL")
+            .all(now) as CaseRow[];
+        for (const r of due) {
+            this.db.prepare('UPDATE mod_cases SET lifted_at = ? WHERE id = ?').run(now, r.id);
+            const guild = this.client.guilds.cache.get(env.guildId);
+            if (guild && await guild.bans.fetch(r.user_id).catch(() => null)) {
+                this.markRecent('unban', r.user_id);
+                await guild.bans.remove(r.user_id, 'Fin del baneo temporal (Minecraft)').catch(err =>
+                    logger.warn(`No se pudo levantar el baneo temporal de ${r.user_tag ?? r.user_id}: ${(err as Error).message}`));
+            }
+            // Origen = el servidor del baneo: allí ya ha vencido solo; los demás lo levantan con este caso.
+            const c = this.addCase({
+                userId: r.user_id, userTag: r.user_tag, action: 'unban', reason: 'Fin del baneo temporal', durationMs: null,
+                moderatorId: null, moderatorName: 'Automático', source: 'minecraft', dmStatus: null,
+                mcName: r.mc_name, originServerId: r.origin_server_id,
+            });
+            if (this.getConfig().log.modActions) void this.postCase(c);
+        }
+        return due.length;
+    }
+
+    // ────────────────────────── Reportes del juego ──────────────────────────
+
+    reports(q: { open?: boolean; limit?: number } = {}): McReport[] {
+        const where = q.open === undefined ? '' : q.open ? 'WHERE closed_at IS NULL' : 'WHERE closed_at IS NOT NULL';
+        return (this.db.prepare(`SELECT * FROM mc_reports ${where} ORDER BY id DESC LIMIT ?`).all(Math.min(q.limit ?? 100, 500)) as ReportRow[]).map(toReport);
+    }
+
+    /** Un /report del juego. Idempotente por (servidor, ref). */
+    addReport(serverId: number, r: { ref: string; reporterName: string; reporterDiscordId: string | null; targetName: string;
+        targetDiscordId: string | null; reason: string; location: string | null }): McReport {
+        const existing = this.db.prepare('SELECT * FROM mc_reports WHERE server_id = ? AND ref = ?').get(serverId, r.ref) as ReportRow | undefined;
+        if (existing) return toReport(existing);
+        const res = this.db.prepare(`
+            INSERT INTO mc_reports (server_id, ref, reporter_name, reporter_discord_id, target_name, target_discord_id, reason, location, created_at)
+            VALUES (@serverId, @ref, @reporterName, @reporterDiscordId, @targetName, @targetDiscordId, @reason, @location, @createdAt)
+        `).run({ ...r, serverId, createdAt: Date.now() });
+        const out = toReport(this.db.prepare('SELECT * FROM mc_reports WHERE id = ?').get(res.lastInsertRowid) as ReportRow);
+        publish('moderation:reports', out);
+        logger.info(`🚩 Reporte de ${out.reporterName} sobre ${out.targetName}: ${out.reason}`);
+        if (this.enabled('reports')) {
+            const embed = new EmbedBuilder().setColor(0xed4245).setTitle(`🚩 Reporte del juego #${out.id}`)
+                .addFields(
+                    { name: 'Reportado', value: out.targetDiscordId ? `${out.targetName} (<@${out.targetDiscordId}>)` : out.targetName, inline: true },
+                    { name: 'Por', value: out.reporterDiscordId ? `${out.reporterName} (<@${out.reporterDiscordId}>)` : out.reporterName, inline: true },
+                    { name: 'Motivo', value: clip(out.reason) },
+                );
+            if (out.location) embed.addFields({ name: 'Dónde', value: out.location });
+            void this.post(embed);
+        }
+        if (out.reporterDiscordId) void this.dmReporter(out, 'received');
+        return out;
+    }
+
+    /**
+     * MD a quien hizo el reporte: al recibirlo (con la invitación a responder, que llega a la bandeja del panel)
+     * y al cerrarlo. Lo que conteste aparece en la conversación del reporte en el panel.
+     */
+    private async dmReporter(r: McReport, what: 'received' | 'closed'): Promise<void> {
+        const embed = what === 'received'
+            ? {
+                title: `🚩 Hemos recibido tu reporte #${r.id}`,
+                description: [
+                    `**Sobre:** ${r.targetName}`,
+                    `**Motivo:** ${clip(r.reason, 500)}`,
+                    '',
+                    'El staff lo revisará lo antes posible.',
+                    'Si quieres añadir algo (pruebas, capturas, más detalles), **responde a este mensaje**: lo leerá el staff y te contestará por aquí.',
+                ].join('\n'),
+                color: '#ed4245',
+                timestamp: true,
+            }
+            : {
+                title: `✅ Tu reporte #${r.id} se ha cerrado`,
+                description: `Gracias por avisar sobre **${r.targetName}**. El staff ya lo ha revisado.`,
+                color: '#3ba55d',
+                timestamp: true,
+            };
+        let status: 'sent' | 'failed' = 'failed';
+        try {
+            const res = await this.messages.sendToUser(r.reporterDiscordId!, { embed }, { source: 'system', sourceRef: `report:${r.id}:${what}` });
+            status = res.status === 'sent' ? 'sent' : 'failed';
+        } catch (err) {
+            logger.warn(`No se pudo escribir por MD a ${r.reporterName} por su reporte #${r.id}: ${(err as Error).message}`);
+        }
+        if (what === 'received') {
+            this.db.prepare('UPDATE mc_reports SET dm_status = ? WHERE id = ?').run(status, r.id);
+            publish('moderation:reports', { id: r.id });
+        }
+    }
+
+    /** Cierra un reporte. Desde el panel se avisa al servidor del juego; desde el juego, no se le devuelve. */
+    closeReport(id: number, by: string, fromServerId: number | null = null): McReport {
+        const row = this.db.prepare('SELECT * FROM mc_reports WHERE id = ?').get(id) as ReportRow | undefined;
+        if (!row) throw new HttpError(404, 'Reporte no encontrado');
+        if (row.closed_at) return toReport(row);
+        this.db.transaction(() => {
+            this.db.prepare('UPDATE mc_reports SET closed_at = ?, closed_by = ? WHERE id = ?').run(Date.now(), by, id);
+            this.db.prepare("INSERT INTO mod_sync_events (kind, target_id, origin_server_id, created_at) VALUES ('report_closed', ?, ?, ?)")
+                .run(id, fromServerId, Date.now());
+        })();
+        const out = toReport(this.db.prepare('SELECT * FROM mc_reports WHERE id = ?').get(id) as ReportRow);
+        publish('moderation:reports', out);
+        if (out.reporterDiscordId) void this.dmReporter(out, 'closed');
+        return out;
+    }
+
+    /** Un reporte cerrado en el juego (por su ref en ese servidor). */
+    closeReportFromServer(serverId: number, ref: string, by: string): void {
+        const row = this.db.prepare('SELECT id FROM mc_reports WHERE server_id = ? AND ref = ?').get(serverId, ref) as { id: number } | undefined;
+        if (row) this.closeReport(row.id, by, serverId);
+    }
+
     // ────────────────────────── Registro (canal de logs) ──────────────────────────
 
     private async post(embed: EmbedBuilder): Promise<void> {
@@ -308,7 +636,10 @@ export class ModerationService {
             );
         if (c.durationMs) embed.addFields({ name: 'Duración', value: fmtDuration(c.durationMs), inline: true });
         if (c.reason) embed.addFields({ name: 'Motivo', value: clip(c.reason) });
+        if (c.mcName) embed.addFields({ name: 'Minecraft', value: c.mcName, inline: true });
+        if (c.expiresAt) embed.addFields({ name: 'Hasta', value: `<t:${Math.floor(c.expiresAt / 1000)}:f>`, inline: true });
         if (c.source === 'discord') embed.setFooter({ text: 'Hecho directamente en Discord' });
+        if (c.source === 'minecraft') embed.setFooter({ text: 'Hecho en el servidor de Minecraft' });
         return this.post(embed);
     }
 

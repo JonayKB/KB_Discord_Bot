@@ -428,6 +428,43 @@ const MIGRATIONS: string[] = [
         error      TEXT
     );
     `,
+    /* v14: sanciones compartidas con los servidores de Minecraft (mod kb_moderation) */ `
+    ALTER TABLE mod_cases ADD COLUMN mc_name TEXT;            -- cuenta de Minecraft sancionada (casos que vienen del juego)
+    ALTER TABLE mod_cases ADD COLUMN expires_at INTEGER;      -- baneo temporal hecho en el juego: cuándo se levanta en Discord
+    ALTER TABLE mod_cases ADD COLUMN lifted_at INTEGER;       -- cuándo se levantó ese baneo temporal
+    ALTER TABLE mod_cases ADD COLUMN origin_server_id INTEGER; -- servidor de Minecraft que lo creó (source = 'minecraft')
+    ALTER TABLE mod_cases ADD COLUMN origin_ref TEXT;         -- id de la sanción en ese servidor: los reintentos no la duplican
+    CREATE UNIQUE INDEX ux_mod_cases_origin ON mod_cases (origin_server_id, origin_ref) WHERE origin_ref IS NOT NULL;
+
+    -- Reportes de jugadores hechos en el juego (/report).
+    CREATE TABLE mc_reports (
+        id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+        server_id           INTEGER NOT NULL,
+        ref                 TEXT NOT NULL,      -- id del reporte en ese servidor
+        reporter_name       TEXT NOT NULL,
+        reporter_discord_id TEXT,
+        target_name         TEXT NOT NULL,
+        target_discord_id   TEXT,
+        reason              TEXT NOT NULL,
+        location            TEXT,
+        created_at          INTEGER NOT NULL,
+        closed_at           INTEGER,
+        closed_by           TEXT,
+        dm_status           TEXT,               -- sent | failed | null (sin Discord vinculado): MD de "recibido" a quien reporta
+        UNIQUE (server_id, ref)
+    );
+
+    -- Lo que los servidores de Minecraft leen para ir a la par (por orden, con cursor):
+    -- casos nuevos y borrados, y reportes cerrados desde el panel. target_id = id del caso o del reporte.
+    CREATE TABLE mod_sync_events (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind             TEXT NOT NULL CHECK (kind IN ('case','delete','report_closed')),
+        target_id        INTEGER NOT NULL,
+        origin_server_id INTEGER,              -- ese servidor ya lo tiene: no se le devuelve
+        created_at       INTEGER NOT NULL
+    );
+    INSERT INTO mod_sync_events (kind, target_id, created_at) SELECT 'case', id, created_at FROM mod_cases ORDER BY id;
+    `,
 ];
 
 export function openDb(file = path.join(DATA_DIR, 'bot.db')): DB {
